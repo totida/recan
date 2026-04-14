@@ -1,5 +1,5 @@
 {
-  "last_update_id": 378875075,
+  "last_update_id": 378875076,
   "users": {
     "652517175": [
       {
@@ -11,11 +11,6 @@
         "last_notified": 1776206622.8806605
       }
     ],
-    "6861147384": [
-      {
-        "url": "https://m.place.naver.com/accommodation/1259756405/room?entry=pll&bk_query=%EB%B9%84%ED%86%A0%EC%95%A0%20%EC%82%B0%EC%B2%AD&businessCategory=pension&level=top&guest=4&checkin=20260603&checkout=20260604",
-        "last_notified": 1776208526.0171123
-      }
-    ]
+    "6861147384": []
   }
 }
