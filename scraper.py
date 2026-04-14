@@ -20,6 +20,7 @@ def save_db(data):
         json.dump(data, f, ensure_ascii=False, indent=2)
 
 def sync_telegram_requests(db):
+    """새로운 메시지를 읽어 링크를 추가하거나 삭제하는 로직"""
     offset = db["last_update_id"] + 1
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getUpdates?offset={offset}"
     
@@ -31,9 +32,10 @@ def sync_telegram_requests(db):
                 db["last_update_id"] = update_id
                 
                 message = update.get("message", {})
-                text = message.get("text", "")
+                text = message.get("text", "").strip() # 앞뒤 공백 제거
                 chat_id = str(message.get("chat", {}).get("id", ""))
                 
+                # 1. 사용자가 새로운 링크를 보냈을 때 (기존과 동일)
                 if text.startswith("http"):
                     if chat_id not in db["users"]:
                         db["users"][chat_id] = []
@@ -42,6 +44,25 @@ def sync_telegram_requests(db):
                         db["users"][chat_id].append(text)
                         requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
                                       data={"chat_id": chat_id, "text": "✅ 새로운 숙소 알림이 등록되었습니다!\n(15분 주기로 감시를 시작합니다)"})
+                
+                # 2. ⭐️ [신규] "삭제" 또는 "초기화"라고 보냈을 때
+                elif text == "삭제" or text == "초기화":
+                    if chat_id in db["users"]:
+                        db["users"][chat_id] = [] # 해당 유저의 링크 목록을 텅 비움
+                        requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
+                                      data={"chat_id": chat_id, "text": "🗑️ 등록하신 모든 알림이 삭제(초기화)되었습니다.\n다시 알림을 원하시면 링크를 새로 보내주세요."})
+                
+                # 3. ⭐️ [신규] "목록"이라고 보냈을 때
+                elif text == "목록":
+                    urls = db.get("users", {}).get(chat_id, [])
+                    if urls:
+                        url_list_text = "\n\n".join([f"{i+1}. {u}" for i, u in enumerate(urls)])
+                        requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
+                                      data={"chat_id": chat_id, "text": f"📋 현재 감시 중인 링크 목록입니다:\n\n{url_list_text}"})
+                    else:
+                        requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
+                                      data={"chat_id": chat_id, "text": "텅~ 등록된 링크가 없습니다. 링크를 보내주시면 감시를 시작할게요!"})
+                        
             save_db(db)
     except Exception as e:
         print(f"메시지 동기화 에러: {e}")
