@@ -2,8 +2,12 @@ name: Naver Reservation Scraper
 
 on:
   schedule:
-    - cron: '*/15 * * * *' # 매 15분마다 자동 실행
-  workflow_dispatch: # 수동 실행 버튼 생성
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+
+# ⭐️ 쓰기 권한 추가 (봇이 코드를 수정할 수 있게 허용)
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -27,3 +31,13 @@ jobs:
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
         run: python scraper.py
+
+      # ⭐️ 크롤링이 끝난 후, 변경된 users.json 파일을 저장소에 덮어쓰는 작업
+      - name: Commit and push changes
+        run: |
+          git config --global user.name 'github-actions[bot]'
+          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+          git add users.json
+          # 파일이 변경되었을 때만 commit 하도록 예외 처리
+          git commit -m "Update user database" || echo "No DB changes to commit"
+          git push
