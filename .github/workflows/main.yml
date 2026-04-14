@@ -4,7 +4,6 @@ on:
   workflow_dispatch:
   schedule:
     - cron: '*/5 * * * *'
-  workflow_dispatch:
 
 # ⭐️ 쓰기 권한 추가 (봇이 코드를 수정할 수 있게 허용)
 permissions:
