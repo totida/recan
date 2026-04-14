@@ -47,45 +47,40 @@ def sync_telegram_requests(db):
         print(f"메시지 동기화 에러: {e}")
 
 def check_vacancy(target_url):
-    """실제 네이버 예약 페이지를 확인하는 엄격한 셀레늄 로직"""
+    """'예약마감' 글자가 없어졌을 때만 알림을 보내는 초심플 로직"""
     options = Options()
     options.add_argument('--headless')
     options.add_argument('--no-sandbox')
     options.add_argument('--disable-dev-shm-usage')
+    options.add_argument('--window-size=390,844') # 아이폰 크기 유지
+    options.add_argument('--user-agent=Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1')
     
     driver = webdriver.Chrome(options=options)
     
     try:
         driver.get(target_url)
-        # 1. 깃허브 서버는 조금 느릴 수 있으므로 대기 시간을 8초로 늘립니다.
-        time.sleep(8) 
+        time.sleep(5) 
+        
+        # 화면을 아래로 내려 숨겨진 글씨를 띄움
+        driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+        time.sleep(5) 
         
         page_text = driver.find_element(By.TAG_NAME, 'body').text
         
-        # 2. 철통 방어막: 화면 로딩이 덜 돼서 글씨가 100자도 안 되거나 '네이버' 글자가 없으면 튕겨냅니다.
+        # 안전장치: 화면 자체가 안 켜진 경우(하얀 화면)는 무시함
         if len(page_text) < 100 or "네이버" not in page_text:
-            print("화면 로딩 지연. (오알림 방지)")
+            print("화면 로딩 지연. (판단 보류)")
             return False
             
-        # 3. 명확히 방이 없다고 안내된 경우
-        if "예약 가능한 객실이 없습니다" in page_text:
-            return False
-            
-        # 4. 깐깐한 상태 검사
-        if "예약마감" in page_text:
-            # 기본적으로 예약마감이 도배되어 있으면 만실입니다.
-            # 단, 누군가 방금 취소해서 1~2개 방만 열린 상태를 잡기 위해 '잔여' 같은 확고한 증거가 있는지 봅니다.
-            if "잔여" in page_text or "남은객실" in page_text:
-                return True
-            else:
-                return False
+        # ⭐️ 경환님 맞춤형 초심플 판단 로직
+        if "예약마감" not in page_text:
+            # 정상적으로 로딩된 화면인데 '예약마감' 글자가 없다면? = 빈자리!
+            print("🚨 '예약마감' 글자가 사라졌습니다! (빈자리 포착)")
+            return True
         else:
-            # 예약마감이라는 단어가 아예 없다면 널널한 곳입니다.
-            # 단, 빈 화면이 아니라 실제 예약창이라는 증거('원', '객실')가 있어야만 인정합니다.
-            if "원" in page_text and "객실" in page_text:
-                return True
-            else:
-                return False
+            # 화면 어딘가에 '예약마감'이 한 글자라도 있으면 만실
+            print("만실 유지 중 ('예약마감' 글자 있음)")
+            return False
                 
     except Exception as e:
         print(f"크롤링 에러 발생: {e}")
