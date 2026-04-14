@@ -76,7 +76,7 @@ def sync_telegram_requests(db):
         print(f"메시지 동기화 에러: {e}")
 
 def check_vacancy(target_url):
-    """'예약마감' 글자가 사라졌는지 확인하는 모바일 위장 로직"""
+    """방 개수와 '예약마감' 개수를 비교하여 빈자리를 찾는 논리적 로직"""
     options = Options()
     options.add_argument('--headless')
     options.add_argument('--no-sandbox')
@@ -88,17 +88,45 @@ def check_vacancy(target_url):
     try:
         driver.get(target_url)
         time.sleep(7)
+        # 화면을 아래로 내려 숨겨진 객실 정보를 모두 띄움
         driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
         time.sleep(3)
         
         page_text = driver.find_element(By.TAG_NAME, 'body').text
         if len(page_text) < 100 or "네이버" not in page_text:
+            print("화면 로딩 지연. (판단 보류)")
             return False
             
-        # '예약마감' 글자가 없으면 자리가 난 것으로 판단
-        return "예약마감" not in page_text
+        # ⭐️ 제안해주신 방 개수 역산 로직
+        count_standard = page_text.count("기준")
+        count_max = page_text.count("최대")
+        count_min = page_text.count("최소")
+        
+        # 세 키워드가 세트로 나온 횟수(최솟값)가 실제 방의 개수
+        room_count = min(count_standard, count_max, count_min)
+        
+        # 예약마감 개수 카운트
+        closed_count = page_text.count("예약마감")
+        
+        # 깃허브 Actions 로그에서 봇의 계산 결과를 눈으로 확인할 수 있습니다.
+        print(f"🔍 [데이터 분석] 방 개수 추정: {room_count}개 (기준:{count_standard}, 최대:{count_max}, 최소:{count_min})")
+        print(f"🔒 [예약 상태] 예약마감 태그: {closed_count}개")
+        
+        # 방을 아예 찾지 못한 경우 (로딩 오류 방지)
+        if room_count == 0:
+            print("방 정보를 찾을 수 없어 판단을 보류합니다.")
+            return False
+            
+        # 방 개수보다 예약마감 개수가 적으면 빈 방이 존재하는 것!
+        if closed_count < room_count:
+            print("🚨 빈자리 포착! (예약마감이 안 된 방이 있습니다)")
+            return True
+        else:
+            print("만실 유지 중 (모든 방 예약마감)")
+            return False
                 
-    except Exception:
+    except Exception as e:
+        print(f"크롤링 에러 발생: {e}")
         return False
     finally:
         driver.quit()
