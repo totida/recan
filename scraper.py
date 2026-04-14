@@ -1,67 +1,74 @@
+import json
 import os
 import requests
-import time
-from datetime import datetime
 from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.common.by import By
+# ... (크롬 옵션 등 기존 셀레늄 세팅 동일) ...
 
-# 1. 텔레그램 세팅 (깃허브 환경변수에서 토큰을 안전하게 불러옵니다)
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
-CHAT_ID = "652517175"
+DB_FILE = "users.json"
 
-# 2. 타겟 URL (5월 2일~3일, 4인 가족 비토애글램핑 산청점)
-TARGET_URL = "https://m.place.naver.com/accommodation/1259756405/room?entry=pll&bk_query=%EB%B9%84%ED%86%A0%EC%95%A0%20%EC%82%B0%EC%B2%AD&businessCategory=pension&level=top&guest=4&checkin=20260502&checkout=20260503"
+def load_db():
+    """JSON DB 파일을 불러옵니다. 파일이 없으면 초기 구조를 만듭니다."""
+    if os.path.exists(DB_FILE):
+        with open(DB_FILE, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    return {"last_update_id": 0, "users": {}}
 
-def send_telegram_msg(message):
-    """텔레그램 메시지 발송 함수"""
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    payload = {"chat_id": CHAT_ID, "text": message}
+def save_db(data):
+    """변경된 데이터를 JSON 파일에 저장합니다."""
+    with open(DB_FILE, 'w', encoding='utf-8') as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+def sync_telegram_requests(db):
+    """새로운 텔레그램 메시지를 읽어 DB에 링크를 추가합니다."""
+    # last_update_id 다음 메시지부터 가져와서 중복 등록 방지
+    offset = db["last_update_id"] + 1
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getUpdates?offset={offset}"
+    
     try:
-        requests.post(url, data=payload)
+        response = requests.get(url).json()
+        if response.get("ok") and response.get("result"):
+            for update in response["result"]:
+                update_id = update["update_id"]
+                db["last_update_id"] = update_id # 마지막 읽은 메시지 번호 갱신
+                
+                message = update.get("message", {})
+                text = message.get("text", "")
+                chat_id = str(message.get("chat", {}).get("id", ""))
+                
+                # 사용자가 보낸 메시지가 http로 시작하는 링크라면
+                if text.startswith("http"):
+                    # 해당 유저의 공간이 없으면 리스트(배열) 생성
+                    if chat_id not in db["users"]:
+                        db["users"][chat_id] = []
+                    
+                    # 중복 링크가 아니면 추가
+                    if text not in db["users"][chat_id]:
+                        db["users"][chat_id].append(text)
+                        
+                        # 사용자에게 등록 완료 확인 메시지 발송
+                        requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
+                                      data={"chat_id": chat_id, "text": "✅ 새로운 숙소 알림이 등록되었습니다!"})
+            save_db(db) # 변경된 내용을 파일에 덮어쓰기
     except Exception as e:
-        print(f"텔레그램 발송 실패: {e}")
+        print(f"메시지 동기화 에러: {e}")
 
-def check_naver_reservation():
-    """네이버 예약 페이지 크롤링"""
-    # 깃허브 클라우드(리눅스) 환경에 맞춘 크롬 옵션 설정
-    options = Options()
-    options.add_argument('--headless')
-    options.add_argument('--no-sandbox')
-    options.add_argument('--disable-dev-shm-usage')
-    options.add_argument('--window-size=1920,1080')
-    options.add_argument('user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36')
-    
-    driver = webdriver.Chrome(options=options)
-    
-    try:
-        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 예약 상태 확인 시작...")
-        driver.get(TARGET_URL)
-        
-        # 동적 데이터 로딩 대기
-        time.sleep(5) 
-        
-        # 전체 텍스트 가져오기
-        page_text = driver.find_element(By.TAG_NAME, 'body').text
-        
-        # 예약 가능 여부 판단
-        if "예약마감" in page_text:
-            if "객실 선택" in page_text or "잔여" in page_text: 
-                msg = f"🚨 [빈자리 포착] 비토애글램핑 5/2 일정에 빈자리가 발생한 것 같습니다!\n\n바로 접속하세요:\n{TARGET_URL}"
-                send_telegram_msg(msg)
-                print("빈자리 알림 전송 완료 (일부 예약마감, 일부 잔여)!")
-            else:
-                print("현재 전 객실 예약 마감 상태입니다.")
-        else:
-            msg = f"🚨 [빈자리 포착] 비토애글램핑 예약 가능 상태입니다!\n\n바로 접속하세요:\n{TARGET_URL}"
-            send_telegram_msg(msg)
-            print("빈자리 알림 전송 완료 (전체 예약 가능)!")
+def run_multi_scrapers(db):
+    """DB에 등록된 모든 유저의 모든 링크를 순회하며 빈자리를 찾습니다."""
+    for chat_id, urls in db["users"].items():
+        for target_url in urls:
+            # --------------------------------------------------
+            # 여기에 기존 셀레늄 크롤링 로직(check_vacancy 등) 적용
+            # is_vacant = check_vacancy(target_url)
+            is_vacant = False # 임시 테스트용
+            # --------------------------------------------------
             
-    except Exception as e:
-        print(f"크롤링 에러 발생: {e}")
-        
-    finally:
-        driver.quit()
+            if is_vacant:
+                msg = f"🚨 요청하신 숙소에 빈자리가 났습니다!\n바로가기: {target_url}"
+                requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
+                              data={"chat_id": chat_id, "text": msg})
 
 if __name__ == "__main__":
-    check_naver_reservation()
+    current_db = load_db()
+    sync_telegram_requests(current_db)
+    run_multi_scrapers(current_db)
