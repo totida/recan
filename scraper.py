@@ -20,12 +20,21 @@ def save_db(data):
         json.dump(data, f, ensure_ascii=False, indent=2)
 
 def sync_telegram_requests(db):
-    """새로운 메시지를 읽어 링크 추가/삭제/목록 확인"""
+    """새로운 메시지를 읽어 링크 추가/삭제/목록 확인 (디버깅 & 인식률 강화)"""
+    # 1. 토큰 누락 방어막
+    if not TELEGRAM_TOKEN:
+        print("🚨 에러: TELEGRAM_TOKEN이 없습니다! .yml 파일의 env 설정을 확인하세요.")
+        return
+
     offset = db.get("last_update_id", 0) + 1
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getUpdates?offset={offset}"
     
     try:
         response = requests.get(url).json()
+        
+        # ⭐️ 2. 봇이 텔레그램에서 무슨 대답을 들었는지 깃허브 로그에 박제 (원인 파악용)
+        print(f"--- 텔레그램 서버 응답 확인 ---\n{response}\n-----------------------------")
+        
         if response.get("ok") and response.get("result"):
             for update in response["result"]:
                 db["last_update_id"] = update["update_id"]
@@ -33,16 +42,20 @@ def sync_telegram_requests(db):
                 text = message.get("text", "").strip()
                 chat_id = str(message.get("chat", {}).get("id", ""))
                 
-                if text.startswith("http"):
-                    if chat_id not in db["users"]:
-                        db["users"][chat_id] = []
+                # ⭐️ 3. 메시지 중간에 링크가 섞여 있어도 찰떡같이 찾아내는 로직
+                if "http" in text:
+                    # 띄어쓰기를 기준으로 쪼개서 진짜 링크만 쏙 뽑아냅니다.
+                    target_url = next((word for word in text.split() if word.startswith("http")), None)
                     
-                    # 중복 체크 (딕셔너리 구조에 맞게 수정)
-                    existing_urls = [item['url'] for item in db["users"][chat_id]]
-                    if text not in existing_urls:
-                        db["users"][chat_id].append({"url": text, "last_notified": 0})
-                        requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
-                                      data={"chat_id": chat_id, "text": "✅ 알림 등록 완료! (빈자리 발생 시 1시간 간격으로 알려드려요)"})
+                    if target_url:
+                        if chat_id not in db["users"]:
+                            db["users"][chat_id] = []
+                        
+                        existing_urls = [item['url'] for item in db["users"][chat_id]]
+                        if target_url not in existing_urls:
+                            db["users"][chat_id].append({"url": target_url, "last_notified": 0})
+                            requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
+                                          data={"chat_id": chat_id, "text": "✅ 알림 등록 완료! (빈자리 발생 시 1시간 간격으로 알려드려요)"})
                 
                 elif text in ["삭제", "초기화"]:
                     db["users"][chat_id] = []
