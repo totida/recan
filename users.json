@@ -1,5 +1,5 @@
 {
-  "last_update_id": 378875089,
+  "last_update_id": 378875091,
   "users": {
     "652517175": [
       {
@@ -9,6 +9,10 @@
       {
         "url": "https://m.place.naver.com/accommodation/1557159426/room?businessCategory=camping&level=top&guest=4&checkin=20260502&checkout=20260503",
         "last_notified": 1776827422.8824112
+      },
+      {
+        "url": "https://m.place.naver.com/accommodation/1557159426/room?businessCategory=camping&level=top&guest=4&checkin=20260503&checkout=20260504",
+        "last_notified": 0
       }
     ],
     "6861147384": []
