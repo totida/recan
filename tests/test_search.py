@@ -144,6 +144,63 @@ class NaverDetailTest(unittest.TestCase):
         self.assertEqual(status, search.STATUS_UNKNOWN)
 
 
+class PlaceLookupTest(unittest.TestCase):
+    CARDS = [
+        {"text": "비토애 산청\n펜션\n경남 산청군 시천면 지리산대로 123\n리뷰 12",
+         "url": "https://m.place.naver.com/place/1259756405/home"},
+        {"text": "비토애 산청 별관\n경남 산청군 단성면 2-3", "url": ""},
+        {"text": "전혀 다른 카페\n서울시 강남구", "url": ""},
+        {"text": "주소 없는 카드\n리뷰 3", "url": ""},
+    ]
+
+    def test_parse_place_cards(self):
+        candidates = search.parse_place_cards("비토애 산청", self.CARDS)
+        self.assertEqual(len(candidates), 2)
+        self.assertEqual(candidates[0]["name"], "비토애 산청")
+        self.assertEqual(candidates[0]["address"], "경남 산청군 시천면 지리산대로 123")
+        self.assertIn("accommodation/1259756405/room", candidates[0]["url"])
+
+    def test_limit(self):
+        cards = [{"text": f"비토애 산청 {i}\n경남 산청군 시천면", "url": ""} for i in range(9)]
+        self.assertEqual(len(search.parse_place_cards("비토애 산청", cards, limit=3)), 3)
+
+    def test_naver_room_url_variants(self):
+        self.assertIn("accommodation/1259756405/room",
+                      search.naver_room_url("https://m.place.naver.com/place/1259756405/home"))
+        self.assertIn("accommodation/1259756405/room",
+                      search.naver_room_url("https://m.map.naver.com/x?code=1259756405"))
+        self.assertEqual(search.naver_room_url("https://www.goodchoice.kr/product/1"),
+                         "https://www.goodchoice.kr/product/1")
+        self.assertEqual(search.naver_room_url(""), "")
+
+    def test_lookup_tries_next_url_when_empty(self):
+        class Browser:
+            def __init__(self):
+                self.visited = []
+
+            def collect_cards(self, url, selectors, wait=5, scrolls=1):
+                self.visited.append(url)
+                return [] if len(self.visited) == 1 else PlaceLookupTest.CARDS
+
+        browser = Browser()
+        config = {"urls": ["https://a/?q={query}", "https://b/?q={query}"],
+                  "card_selectors": [], "max_candidates": 5}
+        candidates = search.lookup_places(browser, "비토애 산청", config)
+        self.assertEqual(len(browser.visited), 2)
+        self.assertEqual(candidates[0]["name"], "비토애 산청")
+
+    def test_lookup_survives_browser_error(self):
+        class Broken:
+            def collect_cards(self, *args, **kwargs):
+                raise RuntimeError("크롬 없음")
+
+        config = {"urls": ["https://a/?q={query}"], "card_selectors": []}
+        self.assertEqual(search.lookup_places(Broken(), "비토애", config), [])
+
+    def test_config_file_has_lookup_urls(self):
+        self.assertTrue(search.load_place_lookup().get("urls"))
+
+
 class UrlTest(unittest.TestCase):
     def test_all_placeholders(self):
         template = "https://s/?q={query}&a={checkin}&b={checkout}&c={checkin_compact}&d={checkout_dot}&g={guests}&n={nights}"

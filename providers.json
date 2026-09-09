@@ -7,6 +7,22 @@
     "모두 실패하면 페이지 전체 텍스트/링크에서 숙소 이름을 찾는 방식으로 대체합니다.",
     "enabled 를 false 로 두면 해당 사이트는 건너뜁니다."
   ],
+  "place_lookup": {
+    "_comment": "숙소 이름 → 주소 후보를 찾는 곳(네이버). 위 URL부터 차례로 시도합니다.",
+    "urls": [
+      "https://m.map.naver.com/search2/search.naver?query={query}",
+      "https://m.search.naver.com/search.naver?query={query}",
+      "https://search.naver.com/search.naver?query={query}"
+    ],
+    "card_selectors": [
+      "li[class*='item']",
+      "div[class*='item']",
+      "a[href*='place']"
+    ],
+    "wait": 5,
+    "scrolls": 1,
+    "max_candidates": 5
+  },
   "sites": [
     {
       "key": "goodchoice",

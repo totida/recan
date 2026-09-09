@@ -247,11 +247,86 @@ def build_url(template, query, checkin, checkout, guests=2):
     return template.format(**values)
 
 
-def load_sites(path=None):
+def _load_config(path=None):
     path = path or PROVIDER_FILE
     with open(path, "r", encoding="utf-8") as f:
-        config = json.load(f)
+        return json.load(f)
+
+
+def load_sites(path=None):
+    config = _load_config(path)
     return [site for site in config.get("sites", []) if site.get("enabled", True)]
+
+
+def load_place_lookup(path=None):
+    return _load_config(path).get("place_lookup", {})
+
+
+NAVER_ID_PATTERNS = (
+    re.compile(r"/(?:place|accommodation|restaurant|hairshop)/(\d{6,})"),
+    re.compile(r"(?:[?&](?:id|code|no|entry|placeId)=)(\d{6,})"),
+    re.compile(r"/(\d{7,})(?:[/?#]|$)"),
+)
+
+
+def naver_room_url(href):
+    """네이버 장소 링크를 숙소 객실 페이지 주소로 바꾼다. 못 찾으면 원래 주소."""
+    if not href or "naver" not in href:
+        return href or ""
+    for pattern in NAVER_ID_PATTERNS:
+        match = pattern.search(href)
+        if match:
+            return f"https://m.place.naver.com/accommodation/{match.group(1)}/room"
+    return href
+
+
+def parse_place_cards(query, cards, limit=5):
+    """검색 카드에서 (숙소 이름, 주소, 링크) 후보를 뽑는다."""
+    candidates, seen = [], set()
+    for card in cards:
+        text = card.get("text", "")
+        if not card_matches(query, text):
+            continue
+        address = address_line(text)
+        if not address:
+            continue
+        name = card_title(text, fallback=query)
+        if normalize(name) == normalize(address):
+            continue
+        key = (normalize(name), normalize(address))
+        if key in seen:
+            continue
+        seen.add(key)
+        candidates.append({
+            "name": name,
+            "address": address,
+            "url": naver_room_url(card.get("url", "")),
+        })
+        if len(candidates) >= limit:
+            break
+    return candidates
+
+
+def lookup_places(browser, query, config=None):
+    """네이버에서 숙소 이름으로 주소 후보를 찾아온다."""
+    config = config if config is not None else load_place_lookup()
+    limit = config.get("max_candidates", 5)
+    for template in config.get("urls", []):
+        url = template.format(query=quote(query))
+        try:
+            cards = browser.collect_cards(
+                url,
+                config.get("card_selectors"),
+                config.get("wait", 5),
+                config.get("scrolls", 1),
+            )
+        except Exception as exc:  # noqa: BLE001
+            print(f"⚠️ 주소 검색 실패({url}): {str(exc).splitlines()[0][:100]}")
+            continue
+        candidates = parse_place_cards(query, cards, limit)
+        if candidates:
+            return candidates
+    return []
 
 
 # --------------------------------------------------------------------------
