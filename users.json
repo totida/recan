@@ -1,12 +1,29 @@
 {
+  "version": 2,
   "last_update_id": 378875095,
-  "users": {
-    "652517175": [
-      {
-        "url": "https://m.place.naver.com/accommodation/1259756405/room?entry=pll&bk_query=%EB%B9%84%ED%86%A0%EC%95%A0%20%EC%82%B0%EC%B2%AD&businessCategory=pension&level=top&guest=4&checkin=20260502&checkout=20260503",
-        "last_notified": 0
-      }
-    ],
-    "6861147384": []
+  "chats": {
+    "652517175": {
+      "state": null,
+      "watches": [
+        {
+          "id": "d2c93bba",
+          "query": "비토애 산청",
+          "checkin": "2026-05-02",
+          "checkout": "2026-05-03",
+          "guests": 4,
+          "url": "https://m.place.naver.com/accommodation/1259756405/room?entry=pll&bk_query=%EB%B9%84%ED%86%A0%EC%95%A0%20%EC%82%B0%EC%B2%AD&businessCategory=pension&level=top&guest=4&checkin=20260502&checkout=20260503",
+          "created_at": 1788997005,
+          "last_searched": 0,
+          "last_notified": 0,
+          "last_signature": "",
+          "was_available": false,
+          "force": false
+        }
+      ]
+    },
+    "6861147384": {
+      "state": null,
+      "watches": []
+    }
   }
 }
