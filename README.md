@@ -163,10 +163,115 @@ GitHub 저장소 → Settings → Secrets → Actions 에 `TELEGRAM_TOKEN` 을 �
 `providers.json` 의 `url` 에 옮겨 적어 주세요. (봇이 보내는 메시지에 각 사이트
 검색 링크가 함께 오므로 눌러서 바로 비교할 수 있습니다.)
 
+## 테스트하는 방법
+
+### 0단계 — 준비 (최초 1회)
+
+1. 텔레그램에서 **@BotFather** → `/newbot` → 토큰 발급
+2. GitHub 저장소 → **Settings → Secrets and variables → Actions → New repository secret**
+   → 이름 `TELEGRAM_TOKEN`, 값에 발급받은 토큰
+3. 만든 봇과의 대화창에서 `/start` 한 번 보내기
+
+### 1단계 — 로직 테스트 (인터넷·크롬·토큰 불필요, 몇 초)
+
+```bash
+python -m unittest discover -s tests -q
+```
+
+날짜 파싱, 달력 경계, 후보 선택, 주소 대조, 알림 주기까지 99개 테스트가 돕니다.
+GitHub Actions 에서도 봇 실행 전에 자동으로 돌기 때문에, 실패하면 봇이 뜨지 않습니다.
+
+### 2단계 — 대화 시뮬레이터 (텔레그램 없이 흐름 확인)
+
+```bash
+pip install -r requirements.txt
+python tools/chat_sim.py
+```
+
+터미널에서 봇과 실제로 대화해 볼 수 있습니다.
+
+```
+👤 비토애 산청
+🤖 📍 '비토애 산청'을(를) 네이버에서 찾아봤어요...
+   [b1] 1. 비토애 산청 · 경남 산청군 시천면...
+👤 b1            ← 버튼은 b번호로 누릅니다
+👤 b10           ← 달력에서 날짜 선택
+👤 !search       ← 지금 검색해서 알림 내용 보기
+👤 !db           ← 저장된 상태 보기
+```
+
+기본은 가짜 데이터라 인터넷이 없어도 됩니다.
+`--live` 를 붙이면 실제 크롬으로 네이버 주소 검색과 사이트 검색까지 수행합니다.
+
+### 3단계 — 예약사이트가 실제로 검색되는지 점검 ⭐
+
+가장 확인이 필요한 부분입니다. **로컬에 아무것도 설치하지 않고** GitHub에서 돌릴 수 있습니다.
+
+> GitHub 저장소 → **Actions** 탭 → 왼쪽 **예약사이트 검색 점검** →
+> **Run workflow** → 숙소 이름 / 체크인 / 체크아웃 입력 → 실행 → 로그 확인
+
+로그에 사이트마다 이렇게 찍힙니다.
+
+```
+🏨 여기어때
+  → https://www.goodchoice.kr/product/search/2?keyword=...
+  카드 24개 · 이름 일치 2개 → 예약 가능
+      ✅ 비토애 산청 120,000원 (주소 일치)
+```
+
+마지막에 요약이 나옵니다.
+
+| 로그 | 뜻 | 할 일 |
+| --- | --- | --- |
+| `카드 0개` | 화면을 못 읽음 | `providers.json` 의 `card_selectors` 수정 |
+| `이름 일치 0개` | 검색 자체가 안 됨 | `providers.json` 의 `url` 형식 수정 |
+| `예약 가능 / 마감` | 정상 | 그대로 두기 |
+
+로컬에 크롬이 있다면 같은 점검을 이렇게도 할 수 있습니다.
+
+```bash
+python tools/check_sites.py --query "비토애 산청" \
+       --checkin 2026-10-03 --checkout 2026-10-05 --dump
+```
+
+### 4단계 — 실제 텔레그램으로 테스트
+
+1. **Actions 탭 → 숙소 예약 알림봇 → Run workflow** (브랜치를 골라 실행할 수 있습니다)
+   - 자동 실행(5분 주기)은 기본 브랜치(`main`)에서만 동작하므로,
+     상시로 쓰려면 이 브랜치를 `main` 에 머지해야 합니다.
+2. 텔레그램에서 봇에게 `비토애 산청` 을 보냅니다.
+3. **먼저 메시지를 보낸 뒤 Run workflow 를 누르면**, 그 실행 동안(약 1분)
+   버튼이 즉시 반응하므로 등록을 한 번에 끝낼 수 있습니다.
+4. 등록되면 곧바로 1차 검색이 돌고 결과 메시지가 옵니다.
+5. `지금` 이라고 보내면 주기를 기다리지 않고 다시 검색합니다.
+
+### 확인 포인트
+
+- Actions 로그의 `📨 새 입력 N건` — 텔레그램 메시지를 받고 있는가
+- 로그의 `🔎 검색: … / - 여기어때: available (1건)` — 사이트별 판정
+- 커밋 목록에 `Update user database` — 등록 내용이 `users.json` 에 저장됨
+- 답장이 전혀 없다면: `TELEGRAM_TOKEN` 시크릿, 봇과 `/start` 했는지 확인
+
+### 문제가 생겼을 때
+
+| 증상 | 원인 / 조치 |
+| --- | --- |
+| 답장이 없음 | `TELEGRAM_TOKEN` 미설정 또는 오타 (로그에 `TELEGRAM_TOKEN 환경변수가 없습니다`) |
+| 버튼을 눌러도 한참 뒤 반응 | 정상 — 조용할 땐 다음 실행(최대 5분)에 처리됩니다 |
+| 주소 후보가 안 뜸 | 3단계 점검 → `providers.json` 의 `place_lookup` 수정 |
+| 모든 사이트가 `검색 결과 없음` | 3단계 점검 → 각 사이트 `url` 수정 |
+| 알림이 너무 잦음/뜸함 | 워크플로의 `SEARCH_INTERVAL_MIN`, `NOTIFY_INTERVAL_MIN` 조정 |
+
 ## 로컬 실행
 
 ```bash
 pip install -r requirements.txt
 python -m unittest discover -s tests -q     # 브라우저 없이 도는 테스트
-TELEGRAM_TOKEN=... python bot.py            # 한 번 실행 (폴링 1회 + 검색)
+python tools/chat_sim.py                    # 대화 시뮬레이터
+TELEGRAM_TOKEN=... python bot.py            # 실제 봇을 한 번 실행
 ```
+
+| 파일 | 용도 |
+| --- | --- |
+| `tools/chat_sim.py` | 텔레그램 없이 대화 흐름 확인 |
+| `tools/check_sites.py` | 예약사이트 검색이 실제로 되는지 점검 |
