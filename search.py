@@ -33,6 +33,13 @@ NOISE_WORDS = {
     "해외여행", "국내여행", "항공", "패키지", "더보기", "광고", "특가", "쿠폰",
 }
 
+# 사이트가 직접 '결과 없음'이라고 알려주는 문구 — 취급하지 않는 숙소라는 뜻이다.
+EMPTY_RESULT_PHRASES = (
+    "검색 결과가 없", "검색결과가 없", "결과가 없어요", "일치하는 숙소가 없",
+    "조건에 맞는 숙소가 없", "찾으시는 숙소가 없",
+)
+NOT_LISTED_NOTE = "이 사이트에는 없는 숙소예요"
+
 STATUS_AVAILABLE = "available"
 STATUS_SOLDOUT = "soldout"
 STATUS_NONE = "none"
@@ -476,6 +483,14 @@ class Browser:
             cards = self._pick_cards(selectors)
         return cards
 
+    def body_text(self, limit=2000):
+        from selenium.webdriver.common.by import By
+
+        try:
+            return self.driver.find_element(By.TAG_NAME, "body").text[:limit]
+        except Exception:  # noqa: BLE001
+            return ""
+
     def info(self):
         """진단용: 실제로 열린 주소와 화면 제목, 본문 길이."""
         from selenium.webdriver.common.by import By
@@ -581,6 +596,8 @@ def naver_detail_result(browser, watch, place_url, name="네이버 예약"):
         note = f"객실 {rooms}개 중 {closed}개 마감"
     elif closed:
         note = f"예약마감 {closed}건"
+    elif len(page) > 300 and not PRICE_RE.search(page):
+        note = "네이버 예약을 쓰지 않는 숙소 같아요"
     else:
         note = "객실 정보를 읽지 못했어요"
     verified = verification_flag(
@@ -642,6 +659,13 @@ def _search_site(browser, watch, site):
         result = SiteResult(site["key"], site["name"], status, url, offers)
         if status != STATUS_NONE:
             return result  # 이름이 맞는 카드를 찾았으니 이 주소를 쓴다
+
+        # 사이트가 '검색 결과가 없어요'라고 답했다면 설정 문제가 아니라
+        # 그 숙소를 취급하지 않는 것이다. 다른 주소를 더 시도할 이유가 없다.
+        reader = getattr(browser, "body_text", None)
+        if reader and any(phrase in reader() for phrase in EMPTY_RESULT_PHRASES):
+            return SiteResult(site["key"], site["name"], STATUS_NONE, url,
+                              note=NOT_LISTED_NOTE)
     return result
 
 

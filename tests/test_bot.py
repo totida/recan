@@ -66,9 +66,10 @@ class FakeTelegram:
 class FakeBrowser:
     """검색 결과를 미리 정해두는 가짜 브라우저."""
 
-    def __init__(self, cards=None, page_text=""):
+    def __init__(self, cards=None, page_text="", body=""):
         self.cards = cards or []
         self._page_text = page_text
+        self.body = body
         self.visited = []
         self.quit_called = False
 
@@ -79,6 +80,9 @@ class FakeBrowser:
     def page_text(self, url, wait=7, scrolls=2):
         self.visited.append(url)
         return self._page_text
+
+    def body_text(self, limit=2000):
+        return self.body
 
     def quit(self):
         self.quit_called = True
@@ -392,6 +396,16 @@ class SearchRunTest(unittest.TestCase):
                                  browser=FakeBrowser())
         self.assertEqual(storage.get_chat(self.db, CHAT)["watches"], [])
         self.assertIn("숙박일이 지나", fake.text())
+
+    def test_site_that_does_not_list_the_place(self):
+        """사이트가 '검색 결과가 없어요'라고 답하면 미취급으로 알린다."""
+        browser = FakeBrowser(cards=[{"text": "다른 숙소\n80,000원"}],
+                              body="'비토애 산청' 검색 결과가 없어요.")
+        self.watch["force"] = True
+        with FakeTelegram() as fake:
+            self.run_search(browser)
+        self.assertIn("미취급", fake.text())
+        self.assertIn("이 사이트에는 없는 숙소예요", fake.text())
 
     def test_site_error_is_reported_not_raised(self):
         class BrokenBrowser(FakeBrowser):
