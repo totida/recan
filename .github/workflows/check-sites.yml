@@ -1,0 +1,50 @@
+name: 예약사이트 검색 점검
+
+# 브라우저에서 Actions → 이 워크플로 → "Run workflow" 로 실행하면
+# 각 예약사이트에서 실제로 숙소가 검색되는지 로그로 확인할 수 있습니다.
+on:
+  workflow_dispatch:
+    inputs:
+      query:
+        description: '숙소 이름 (예: 비토애 산청)'
+        required: true
+      checkin:
+        description: '체크인 YYYY-MM-DD'
+        required: true
+      checkout:
+        description: '체크아웃 YYYY-MM-DD'
+        required: true
+      guests:
+        description: '인원'
+        required: false
+        default: '2'
+      dump:
+        description: '읽어온 카드 원문까지 보기'
+        type: boolean
+        required: false
+        default: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: 사이트 점검
+        run: |
+          python tools/check_sites.py \
+            --query "${{ inputs.query }}" \
+            --checkin "${{ inputs.checkin }}" \
+            --checkout "${{ inputs.checkout }}" \
+            --guests "${{ inputs.guests }}" \
+            ${{ inputs.dump && '--dump' || '' }}
