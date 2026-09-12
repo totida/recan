@@ -1,10 +1,12 @@
 {
   "_comment": [
     "예약사이트 검색 설정입니다. 사이트가 URL 구조나 화면을 바꾸면 이 파일만 고치면 됩니다.",
+    "urls 는 위에서부터 차례로 시도하고, 숙소 이름이 맞는 카드를 찾으면 거기서 멈춥니다.",
     "url 안에서 쓸 수 있는 값: {query} {checkin} {checkout} {checkin_compact} {checkout_compact}",
     "{checkin_dot} {checkout_dot} {guests} {nights}",
     "card_selectors 는 검색결과 카드 후보이며, 위에서부터 하나라도 잡히면 그것을 사용합니다.",
-    "모두 실패하면 페이지 전체 텍스트/링크에서 숙소 이름을 찾는 방식으로 대체합니다.",
+    "모두 실패하면 페이지 전체 링크에서 숙소 이름을 찾는 방식으로 대체합니다.",
+    "follow_place: 검색 결과의 네이버 장소 링크를 따라가 객실 상태까지 확인합니다.",
     "enabled 를 false 로 두면 해당 사이트는 건너뜁니다."
   ],
   "place_lookup": {
@@ -28,8 +30,14 @@
       "key": "goodchoice",
       "name": "여기어때",
       "enabled": true,
-      "url": "https://www.goodchoice.kr/product/search/2?keyword={query}&sel_date={checkin}&sel_date2={checkout}&persons={guests}",
+      "urls": [
+        "https://www.goodchoice.kr/search?keyword={query}&checkIn={checkin}&checkOut={checkout}&personal={guests}",
+        "https://www.goodchoice.kr/search/keyword?keyword={query}&checkIn={checkin}&checkOut={checkout}",
+        "https://m.goodchoice.kr/search?keyword={query}",
+        "https://www.goodchoice.kr/product/search/2?keyword={query}&sel_date={checkin}&sel_date2={checkout}&persons={guests}"
+      ],
       "card_selectors": [
+        "a[href*='/space/']",
         "a[href*='/product/']",
         "li[class*='item']",
         "div[class*='card']"
@@ -41,22 +49,28 @@
       "key": "yanolja",
       "name": "야놀자",
       "enabled": true,
-      "url": "https://www.yanolja.com/search/{query}?keyword={query}&checkinDate={checkin}&checkoutDate={checkout}&adultCount={guests}",
+      "urls": [
+        "https://nol.yanolja.com/discovery/list/search/PRODUCT_CATEGORY_KOREA_ACCOMMODATION?q={query}&checkInDate={checkin}&checkOutDate={checkout}&adultCount={guests}",
+        "https://www.yanolja.com/search/{query}?checkInDate={checkin}&checkOutDate={checkout}&adultCount={guests}"
+      ],
       "card_selectors": [
+        "a[href*='/stay/domestic/']",
         "a[href*='/reserve/']",
-        "a[href*='/pension/']",
-        "a[href*='/motel/']",
         "li[class*='item']",
         "div[class*='card']"
       ],
-      "wait": 6,
+      "wait": 7,
       "scrolls": 2
     },
     {
       "key": "naver",
       "name": "네이버 예약",
       "enabled": true,
-      "url": "https://m.search.naver.com/search.naver?ssc=tab.m_hotel.all&query={query}&checkIn={checkin}&checkOut={checkout}&adultCount={guests}",
+      "follow_place": true,
+      "urls": [
+        "https://m.search.naver.com/search.naver?ssc=tab.m_hotel.all&query={query}&checkIn={checkin}&checkOut={checkout}&adultCount={guests}",
+        "https://m.search.naver.com/search.naver?query={query}"
+      ],
       "card_selectors": [
         "a[href*='place.naver.com']",
         "li[class*='item']",
@@ -69,13 +83,17 @@
       "key": "hanatour",
       "name": "하나투어",
       "enabled": true,
-      "url": "https://www.hanatour.com/hotel/search?keyword={query}&checkInDate={checkin_compact}&checkOutDate={checkout_compact}&adultCount={guests}",
+      "urls": [
+        "https://m.hanatour.com/hotel/domestic/search?keyword={query}&checkInDate={checkin_compact}&checkOutDate={checkout_compact}&adultCount={guests}",
+        "https://www.hanatour.com/hotel/search?keyword={query}&checkInDate={checkin_compact}&checkOutDate={checkout_compact}&adultCount={guests}",
+        "https://www.hanatour.com/search?searchWord={query}"
+      ],
       "card_selectors": [
         "a[href*='/hotel/']",
         "li[class*='item']",
         "div[class*='card']"
       ],
-      "wait": 7,
+      "wait": 8,
       "scrolls": 2
     }
   ]

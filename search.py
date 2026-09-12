@@ -23,7 +23,14 @@ SOLDOUT_KEYWORDS = (
 )
 
 PRICE_RE = re.compile(r"(\d{1,3}(?:,\d{3})+|\d{4,8})\s*원")
-NOISE_LINE_RE = re.compile(r"^(\d|[₩$]|리뷰|평점|후기|쿠폰|할인|무료|광고|AD|배지)")
+NOISE_LINE_RE = re.compile(r"^(\d|[₩$(]|리뷰|평점|후기|쿠폰|할인|무료|광고|AD|배지)")
+# 사이트마다 카드 맨 위에 붙는 분류/버튼 문구 — 숙소 이름이 아니다.
+NOISE_WORDS = {
+    "예약", "예약하기", "주소보기", "지도", "지도보기", "길찾기", "내비게이션", "전화", "공유",
+    "사이트", "네이버페이", "톡톡", "숙박", "대실", "국내숙소", "해외숙소", "메뉴닫기",
+    "펜션", "호텔", "모텔", "리조트", "게스트하우스", "글램핑", "캠핑", "풀빌라", "한옥",
+    "해외여행", "국내여행", "항공", "패키지", "더보기", "광고", "특가", "쿠폰",
+}
 
 STATUS_AVAILABLE = "available"
 STATUS_SOLDOUT = "soldout"
@@ -108,13 +115,28 @@ def find_price(text):
     return f"{raw}원"
 
 
-def card_title(text, fallback=""):
-    """카드 텍스트의 첫 의미있는 줄을 숙소/객실 이름으로 사용."""
+def _title_candidates(text):
     for line in (text or "").splitlines():
         line = line.strip()
         if len(line) < 2 or NOISE_LINE_RE.match(line):
             continue
-        return line[:45]
+        if line in NOISE_WORDS or looks_like_address(line):
+            continue
+        yield line
+
+
+def card_title(text, fallback="", query=""):
+    """카드에서 숙소/객실 이름으로 보이는 줄을 고른다.
+
+    분류·버튼 문구와 주소 줄은 건너뛰고, 찾는 이름이 들어간 줄을 우선한다.
+    """
+    lines = list(_title_candidates(text))
+    if query:
+        for line in lines:
+            if match_score(query, line) >= 0.5:
+                return line[:45]
+    if lines:
+        return lines[0][:45]
     return fallback[:45]
 
 
@@ -124,7 +146,15 @@ ADDRESS_STOPWORDS = {"대한민국", "한국", "korea", "번지", "일원", "인
 ADDRESS_SUFFIXES = ("특별시", "광역시", "특별자치도", "특별자치시", "도", "시", "군", "구",
                     "읍", "면", "리", "동", "로", "길", "가")
 ADDRESS_THRESHOLD = 0.25
-ADDRESS_LINE_RE = re.compile(r"[가-힣]{2,}\s*(?:시|군|구|읍|면|동|리)(?:\s|$|,)")
+
+# '럭셔리'의 '리' 처럼 우연히 걸리는 것을 막기 위해, 행정구역 표기를 제대로 확인한다.
+PROVINCE_RE = re.compile(
+    r"^(서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주"
+    r"|서울특별시|경기도|강원특별자치도|충청북도|충청남도|전라북도|전북특별자치도|전라남도"
+    r"|경상북도|경상남도|제주특별자치도)(\s|특별시|광역시|도\s)"
+)
+ADMIN_CITY_RE = re.compile(r"[가-힣]{1,6}(?:시|군|구)(?:\s|$|,)")
+ADMIN_TOWN_RE = re.compile(r"[가-힣]{1,8}(?:읍|면|동|리|로|길|가)(?:\s|\d|$|,)")
 
 
 def address_tokens(address):
@@ -170,12 +200,21 @@ def verification_flag(score):
     return None if score is None else score >= ADDRESS_THRESHOLD
 
 
+def looks_like_address(line):
+    """'경상남도 …', '산청군 신안면' 같은 줄만 주소로 인정한다."""
+    line = (line or "").strip()
+    if len(line) < 4 or PRICE_RE.search(line):
+        return False
+    if PROVINCE_RE.match(line):
+        return True
+    return bool(ADMIN_CITY_RE.search(line) and ADMIN_TOWN_RE.search(line))
+
+
 def address_line(text):
     """카드 텍스트에서 주소로 보이는 줄을 찾아준다."""
     for line in (text or "").splitlines():
-        line = line.strip()
-        if len(line) >= 4 and ADDRESS_LINE_RE.search(line) and not PRICE_RE.search(line):
-            return line[:60]
+        if looks_like_address(line):
+            return line.strip()[:60]
     return ""
 
 
@@ -204,7 +243,7 @@ def analyze_cards(query, cards, search_url="", limit=3, address=None):
             soldout += 1
             continue
         price = find_price(text)
-        title = card_title(text, fallback=query)
+        title = card_title(text, fallback=query, query=query)
         key = normalize(title) + price
         if key in seen:
             continue
@@ -258,6 +297,12 @@ def load_sites(path=None):
     return [site for site in config.get("sites", []) if site.get("enabled", True)]
 
 
+def site_urls(site):
+    """사이트 설정에서 시도할 검색 주소 목록. urls(리스트) 또는 url(단일) 모두 지원."""
+    urls = site.get("urls") or ([site["url"]] if site.get("url") else [])
+    return [u for u in urls if u]
+
+
 def load_place_lookup(path=None):
     return _load_config(path).get("place_lookup", {})
 
@@ -290,7 +335,7 @@ def parse_place_cards(query, cards, limit=5):
         address = address_line(text)
         if not address:
             continue
-        name = card_title(text, fallback=query)
+        name = card_title(text, fallback=query, query=query)
         if normalize(name) == normalize(address):
             continue
         key = (normalize(name), normalize(address))
@@ -305,6 +350,19 @@ def parse_place_cards(query, cards, limit=5):
         if len(candidates) >= limit:
             break
     return candidates
+
+
+def first_place_link(query, cards):
+    """검색 카드 중 이름이 맞는 네이버 장소 링크를 하나 고른다."""
+    for card in cards:
+        url = card.get("url", "")
+        if "naver" not in url or "place" not in url:
+            continue
+        if card_matches(query, card.get("text", "")):
+            room_url = naver_room_url(url)
+            if "accommodation" in room_url:
+                return room_url
+    return ""
 
 
 def lookup_places(browser, query, config=None):
@@ -447,57 +505,77 @@ def _naver_detail_url(url, checkin, checkout, guests):
     return f"{base}{joiner}checkin={ci}&checkout={co}&guest={guests}"
 
 
+def naver_detail_result(browser, watch, place_url, name="네이버 예약"):
+    """네이버 숙소 상세 페이지에서 객실 수와 예약마감 수를 비교한다."""
+    url = _naver_detail_url(place_url, watch["checkin"], watch["checkout"],
+                            watch.get("guests", 2))
+    try:
+        page = browser.page_text(url)
+    except Exception as exc:  # noqa: BLE001
+        return SiteResult("naver_detail", name, STATUS_ERROR, url,
+                          note=str(exc).splitlines()[0][:120])
+
+    status, rooms, closed = analyze_naver_detail(page)
+    note = f"객실 {rooms}개 중 {closed}개 마감" if rooms else "객실 정보를 읽지 못했어요"
+    verified = verification_flag(
+        address_match_score(watch.get("address"), page, ignore=watch.get("query", ""))
+    )
+    if verified is False:
+        note += " · 주소 미확인"
+    offers = ([Offer(title="빈 객실 있음", url=url, address=address_line(page),
+                     verified=verified)]
+              if status == STATUS_AVAILABLE else [])
+    return SiteResult("naver_detail", name, status, url, offers, note)
+
+
+def _search_site(browser, watch, site):
+    """사이트 하나를 검색. url 후보를 차례로 시도하고 마지막 결과를 돌려준다."""
+    result = SiteResult(site["key"], site["name"], STATUS_ERROR,
+                        note="검색 주소가 설정되지 않았습니다")
+    for template in site_urls(site):
+        try:
+            url = build_url(template, watch["query"], watch["checkin"],
+                            watch["checkout"], watch.get("guests", 2))
+        except (KeyError, ValueError) as exc:
+            result = SiteResult(site["key"], site["name"], STATUS_ERROR,
+                                note=f"URL 설정 오류: {exc}")
+            continue
+        try:
+            cards = browser.collect_cards(url, site.get("card_selectors"),
+                                          site.get("wait", 6), site.get("scrolls", 2))
+        except Exception as exc:  # noqa: BLE001
+            result = SiteResult(site["key"], site["name"], STATUS_ERROR, url,
+                                note=str(exc).splitlines()[0][:120])
+            continue
+
+        # 네이버는 검색 결과의 장소 링크를 따라가 객실 상태까지 확인한다.
+        if site.get("follow_place"):
+            place_url = first_place_link(watch["query"], cards)
+            if place_url:
+                detail = naver_detail_result(browser, watch, place_url, site["name"])
+                detail.key = site["key"]
+                return detail
+
+        status, offers = analyze_cards(watch["query"], cards, url,
+                                       address=watch.get("address"))
+        result = SiteResult(site["key"], site["name"], status, url, offers)
+        if status != STATUS_NONE:
+            return result  # 이름이 맞는 카드를 찾았으니 이 주소를 쓴다
+    return result
+
+
 def search_watch(browser, watch, sites=None):
     """감시 항목 하나에 대해 모든 사이트를 검색."""
     sites = sites if sites is not None else load_sites()
     results = []
 
-    if watch.get("url") and "naver" in watch["url"]:
-        url = _naver_detail_url(
-            watch["url"], watch["checkin"], watch["checkout"], watch.get("guests", 2)
-        )
-        try:
-            page = browser.page_text(url)
-            status, rooms, closed = analyze_naver_detail(page)
-            note = f"객실 {rooms}개 중 {closed}개 마감" if rooms else "객실 정보를 읽지 못했어요"
-            score = address_match_score(watch.get("address"), page,
-                                        ignore=watch.get("query", ""))
-            verified = verification_flag(score)
-            if verified is False:
-                note += " · 주소 미확인"
-            offers = ([Offer(title="빈 객실 있음", url=url,
-                             address=address_line(page), verified=verified)]
-                      if status == STATUS_AVAILABLE else [])
-            results.append(
-                SiteResult("naver_detail", "네이버 예약(등록 링크)", status, url, offers, note)
-            )
-        except Exception as exc:  # noqa: BLE001
-            results.append(
-                SiteResult("naver_detail", "네이버 예약(등록 링크)", STATUS_ERROR, url,
-                           note=str(exc)[:120])
-            )
+    registered = watch.get("url") or ""
+    if "naver" in registered:
+        results.append(naver_detail_result(browser, watch, registered,
+                                           "네이버 예약(등록 링크)"))
 
     for site in sites:
-        if watch.get("url") and site["key"] == "naver" and "naver" in watch["url"]:
+        if "naver" in registered and site["key"] == "naver":
             continue  # 상세 링크로 이미 확인함
-        try:
-            url = build_url(
-                site["url"], watch["query"], watch["checkin"], watch["checkout"],
-                watch.get("guests", 2),
-            )
-        except (KeyError, ValueError) as exc:
-            results.append(SiteResult(site["key"], site["name"], STATUS_ERROR,
-                                      note=f"URL 설정 오류: {exc}"))
-            continue
-        try:
-            cards = browser.collect_cards(
-                url, site.get("card_selectors"), site.get("wait", 6), site.get("scrolls", 2)
-            )
-            status, offers = analyze_cards(
-                watch["query"], cards, url, address=watch.get("address")
-            )
-            results.append(SiteResult(site["key"], site["name"], status, url, offers))
-        except Exception as exc:  # noqa: BLE001
-            results.append(SiteResult(site["key"], site["name"], STATUS_ERROR, url,
-                                      note=str(exc).splitlines()[0][:120]))
+        results.append(_search_site(browser, watch, site))
     return results

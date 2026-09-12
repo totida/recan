@@ -126,6 +126,51 @@ class AddressTest(unittest.TestCase):
         self.assertIsNone(offers[0].verified)
 
 
+class RealCardTest(unittest.TestCase):
+    """실제 점검 로그에서 가져온 카드 모양으로 회귀 확인."""
+
+    NAVER_CARD = ("예약\n비토애 럭셔리 글램핑 산청점펜션\n주소보기\n"
+                  "경상남도 산청군 신안면 둔철산로 575-26 비토애 럭셔리글램핑 산청점\n"
+                  "1공유\n네이버페이\n지도 전화 길찾기 내비게이션")
+    YANOLJA_CARD = "펜션\n산청 비토애럭셔리글램핑\n산청군 신안면\n5.0\n(55)\n숙박\n예약마감"
+
+    def test_naver_card_address_and_title(self):
+        self.assertTrue(search.address_line(self.NAVER_CARD).startswith("경상남도 산청군"))
+        self.assertEqual(search.card_title(self.NAVER_CARD, query="비토애 산청"),
+                         "비토애 럭셔리 글램핑 산청점펜션")
+
+    def test_yanolja_card_address_and_title(self):
+        self.assertEqual(search.address_line(self.YANOLJA_CARD), "산청군 신안면")
+        self.assertEqual(search.card_title(self.YANOLJA_CARD, query="비토애 산청"),
+                         "산청 비토애럭셔리글램핑")
+
+    def test_yanolja_card_is_soldout(self):
+        status, _ = search.analyze_cards("비토애 산청", [{"text": self.YANOLJA_CARD}],
+                                         address="경남 산청군 신안면")
+        self.assertEqual(status, search.STATUS_SOLDOUT)
+
+    def test_name_line_is_not_mistaken_for_address(self):
+        self.assertEqual(search.address_line("비토애 럭셔리 글램핑 산청점펜션"), "")
+        self.assertFalse(search.looks_like_address("리뷰 152"))
+        self.assertFalse(search.looks_like_address("1박 120,000원"))
+
+    def test_category_line_is_not_a_title(self):
+        self.assertEqual(search.card_title("펜션\n소노벨 변산\n120,000원"), "소노벨 변산")
+
+    def test_place_link_is_followed(self):
+        cards = [
+            {"text": "지도보기", "url": "https://m.place.naver.com/place/list?query=x"},
+            {"text": "비토애 럭셔리 글램핑 산청점\n펜션",
+             "url": "https://m.place.naver.com/place/1259756405?entry=pll"},
+        ]
+        link = search.first_place_link("비토애 산청", cards)
+        self.assertEqual(link, "https://m.place.naver.com/accommodation/1259756405/room")
+
+    def test_place_link_ignores_other_places(self):
+        cards = [{"text": "제주 카페\n카페", "url": "https://m.place.naver.com/place/999999"}]
+        self.assertEqual(search.first_place_link("비토애 산청", cards), "")
+
+
 class NaverDetailTest(unittest.TestCase):
     def test_vacancy_found(self):
         text = "네이버 예약 페이지 " + ("객실 안내 " * 12) + ("기준 최대 최소 예약마감 " * 2) + "기준 최대 최소 120,000원"
@@ -214,8 +259,18 @@ class UrlTest(unittest.TestCase):
 
     def test_configured_sites_build(self):
         for site in search.load_sites():
-            url = search.build_url(site["url"], "비토애 산청", "2026-05-02", "2026-05-03", 2)
-            self.assertTrue(url.startswith("https://"), site["key"])
+            candidates = search.site_urls(site)
+            self.assertTrue(candidates, site["key"])
+            for template in candidates:
+                url = search.build_url(template, "비토애 산청", "2026-05-02",
+                                       "2026-05-03", 2)
+                self.assertTrue(url.startswith("https://"), site["key"])
+
+    def test_site_urls_accepts_single_url(self):
+        self.assertEqual(search.site_urls({"url": "https://a"}), ["https://a"])
+        self.assertEqual(search.site_urls({"urls": ["https://a", "https://b"]}),
+                         ["https://a", "https://b"])
+        self.assertEqual(search.site_urls({}), [])
 
     def test_naver_detail_url_replaces_dates(self):
         original = "https://m.place.naver.com/accommodation/123/room?entry=pll&checkin=20260101&checkout=20260102&guest=2"
