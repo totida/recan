@@ -130,6 +130,10 @@ def main():
                 if matched:
                     best = ("ok", url)
                     break
+                if any(p in browser.body_text() for p in search.EMPTY_RESULT_PHRASES):
+                    print(f"      🚫 이 사이트에는 없는 숙소입니다 (검색은 정상 동작)")
+                    best = ("not_listed", url)
+                    break
                 best = best or ("none" if cards else "empty", url)
 
             if best is None:
@@ -138,6 +142,8 @@ def main():
                 problems.append(f"{site['name']}: 카드를 하나도 못 읽음 → card_selectors 확인")
             elif best[0] == "none":
                 problems.append(f"{site['name']}: 검색 결과에 숙소가 없음 → urls 형식 확인")
+            elif best[0] == "not_listed":
+                print(f"\n  ✅ 검색은 정상 — 이 사이트가 해당 숙소를 취급하지 않습니다")
             else:
                 print(f"\n  ✅ 사용 가능한 주소: {best[1]}")
     finally:

@@ -98,6 +98,8 @@ def format_report(watch, results, header=""):
     for result in results:
         icon = STATUS_ICON.get(result.status, "❔")
         label = STATUS_LABEL.get(result.status, result.status)
+        if result.note == search.NOT_LISTED_NOTE:
+            icon, label = "🚫", "미취급"
         suffix = f" — {result.note}" if result.note else ""
         lines.append(f"{icon} {result.name} · {label}{suffix}")
         for offer in result.offers:
