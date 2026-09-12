@@ -45,8 +45,8 @@ jobs:
           SEARCH_INTERVAL_MIN: '60'   # 항목별 검색 주기(분)
           NOTIFY_INTERVAL_MIN: '60'   # 같은 결과 재알림 최소 간격(분)
           POLL_TIMEOUT_SEC: '20'      # 대화 중 long polling 대기(초)
-          IDLE_EXIT_SEC: '60'         # 이 시간 동안 조용하면 실행 종료(초)
-          MAX_RUN_SEC: '300'          # 한 번의 실행 상한(초)
+          IDLE_EXIT_SEC: '150'        # 이 시간 동안 조용하면 실행 종료(초)
+          MAX_RUN_SEC: '900'          # 한 번의 실행 상한(초, 최대 15분 온라인)
         run: python bot.py
 
       - name: 변경된 users.json 저장
