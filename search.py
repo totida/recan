@@ -8,6 +8,7 @@
 순수 함수로 분리해 두었다.
 """
 
+import difflib
 import json
 import os
 import re
@@ -90,9 +91,33 @@ def match_score(query, text):
     return hits / len(tokens)
 
 
+SIMILARITY_THRESHOLD = 0.7
+SIMILARITY_MIN_BLOCK = 3
+
+
+def similarity(query, text):
+    """글자 단위 유사도 (일치 비율, 가장 긴 연속 일치 길이).
+
+    예약사이트마다 이름 표기가 조금씩 다르다.
+    '사천 비토애풀빌라&글램핑' vs '사천 비토애풀빌라펜션&글램핑' 처럼
+    중간에 단어가 끼어들어도 같은 숙소로 보기 위한 장치.
+    """
+    nq, nt = normalize(query), normalize(text)
+    if len(nq) < 2 or not nt:
+        return 0.0, 0
+    blocks = [b for b in difflib.SequenceMatcher(None, nq, nt, autojunk=False)
+              .get_matching_blocks() if b.size]
+    if not blocks:
+        return 0.0, 0
+    return sum(b.size for b in blocks) / len(nq), max(b.size for b in blocks)
+
+
 def card_matches(query, text, threshold=0.6):
     """카드가 찾는 숙소인지 판단."""
     if match_score(query, text) >= threshold:
+        return True
+    ratio, longest = similarity(query, text)
+    if ratio >= SIMILARITY_THRESHOLD and longest >= SIMILARITY_MIN_BLOCK:
         return True
     tokens = sorted(query_tokens(query), key=len, reverse=True)
     if tokens and len(normalize(tokens[0])) >= 3:
@@ -481,17 +506,33 @@ def _elements_to_cards(elements, limit=120):
 # 네이버 상세 페이지(등록된 링크가 있을 때) — 객실 수 vs 예약마감 수 비교
 # --------------------------------------------------------------------------
 
+EMPTY_ROOM_PHRASES = (
+    "예약 가능한 객실이 없", "판매중인 객실이 없", "판매 중인 객실이 없",
+    "선택하신 날짜에 예약", "객실이 없습니다",
+)
+
+
 def analyze_naver_detail(page_text):
-    """네이버 숙소 상세 페이지 텍스트에서 빈 객실 여부를 판단."""
-    if len(page_text or "") < 100:
+    """네이버 숙소 상세 페이지 텍스트에서 빈 객실 여부를 판단.
+
+    객실 카드마다 '기준/최대/최소' 가 함께 나오는 점을 이용해 객실 수를 세고,
+    '예약마감' 수와 비교한다. 숫자가 어긋날 수 있으므로 가격 표시와
+    '예약 가능한 객실이 없습니다' 문구로 한 번 더 확인한다.
+    """
+    page_text = page_text or ""
+    if len(page_text) < 100:
         return STATUS_UNKNOWN, 0, 0
+
     room_count = min(
         page_text.count("기준"), page_text.count("최대"), page_text.count("최소")
     )
     closed = page_text.count("예약마감")
+
+    if any(phrase in page_text for phrase in EMPTY_ROOM_PHRASES):
+        return STATUS_SOLDOUT, room_count, closed
     if room_count == 0:
         return STATUS_UNKNOWN, 0, closed
-    if closed < room_count:
+    if closed < room_count and PRICE_RE.search(page_text):
         return STATUS_AVAILABLE, room_count, closed
     return STATUS_SOLDOUT, room_count, closed
 
@@ -516,7 +557,12 @@ def naver_detail_result(browser, watch, place_url, name="네이버 예약"):
                           note=str(exc).splitlines()[0][:120])
 
     status, rooms, closed = analyze_naver_detail(page)
-    note = f"객실 {rooms}개 중 {closed}개 마감" if rooms else "객실 정보를 읽지 못했어요"
+    if rooms and closed <= rooms:
+        note = f"객실 {rooms}개 중 {closed}개 마감"
+    elif closed:
+        note = f"예약마감 {closed}건"
+    else:
+        note = "객실 정보를 읽지 못했어요"
     verified = verification_flag(
         address_match_score(watch.get("address"), page, ignore=watch.get("query", ""))
     )
@@ -528,13 +574,24 @@ def naver_detail_result(browser, watch, place_url, name="네이버 예약"):
     return SiteResult("naver_detail", name, status, url, offers, note)
 
 
+def search_term(watch):
+    """예약사이트 검색에 쓸 말.
+
+    네이버 정식 명칭(예: '비토애 럭셔리 글램핑 산청점')을 그대로 넣으면
+    다른 사이트에서는 오히려 결과가 안 나온다. 사용자가 처음 적은 짧은 이름
+    (예: '비토애 산청')으로 찾고, 진짜 그 숙소인지는 주소로 확인한다.
+    """
+    return watch.get("keyword") or watch.get("query", "")
+
+
 def _search_site(browser, watch, site):
     """사이트 하나를 검색. url 후보를 차례로 시도하고 마지막 결과를 돌려준다."""
+    term = search_term(watch)
     result = SiteResult(site["key"], site["name"], STATUS_ERROR,
                         note="검색 주소가 설정되지 않았습니다")
     for template in site_urls(site):
         try:
-            url = build_url(template, watch["query"], watch["checkin"],
+            url = build_url(template, term, watch["checkin"],
                             watch["checkout"], watch.get("guests", 2))
         except (KeyError, ValueError) as exc:
             result = SiteResult(site["key"], site["name"], STATUS_ERROR,
@@ -549,15 +606,19 @@ def _search_site(browser, watch, site):
             continue
 
         # 네이버는 검색 결과의 장소 링크를 따라가 객실 상태까지 확인한다.
+        detail = None
         if site.get("follow_place"):
-            place_url = first_place_link(watch["query"], cards)
+            place_url = first_place_link(term, cards)
             if place_url:
                 detail = naver_detail_result(browser, watch, place_url, site["name"])
                 detail.key = site["key"]
-                return detail
+                if detail.status != STATUS_UNKNOWN:
+                    return detail
 
-        status, offers = analyze_cards(watch["query"], cards, url,
+        status, offers = analyze_cards(term, cards, url,
                                        address=watch.get("address"))
+        if detail is not None and status == STATUS_NONE:
+            return detail  # 상세도 검색도 확실치 않으면 상세 쪽 안내를 쓴다
         result = SiteResult(site["key"], site["name"], status, url, offers)
         if status != STATUS_NONE:
             return result  # 이름이 맞는 카드를 찾았으니 이 주소를 쓴다

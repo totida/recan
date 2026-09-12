@@ -171,6 +171,50 @@ class RealCardTest(unittest.TestCase):
         self.assertEqual(search.first_place_link("비토애 산청", cards), "")
 
 
+class FuzzyMatchTest(unittest.TestCase):
+    """이름 표기가 사이트마다 달라도 같은 숙소로 보는지."""
+
+    YANOLJA_SACHEON = ("펜션\n사천 비토애풀빌라펜션&글램핑\n사천시 서포면\n4.2\n(125)\n"
+                       "숙박 15:00~\n8%\n500,000\n460,000\n원~")
+    NAVER_SACHEON = "비토애 풀빌라펜션N럭셔리글램핑\n네이버페이\n톡톡\n펜션"
+    YANOLJA_SANCHEONG = "펜션\n산청 비토애럭셔리글램핑\n산청군 신안면\n5.0\n(55)\n예약마감"
+
+    def test_word_inserted_in_the_middle(self):
+        # '비토애풀빌라&글램핑' vs '비토애풀빌라펜션&글램핑'
+        self.assertTrue(search.card_matches("사천 비토애풀빌라&글램핑", self.YANOLJA_SACHEON))
+
+    def test_different_spelling_on_naver(self):
+        self.assertTrue(search.card_matches("사천 비토애풀빌라&글램핑", self.NAVER_SACHEON))
+
+    def test_official_name_matches_short_listing(self):
+        self.assertTrue(search.card_matches("비토애 럭셔리 글램핑 산청점",
+                                            self.YANOLJA_SANCHEONG))
+
+    def test_similar_but_different_place_is_rejected(self):
+        self.assertFalse(search.card_matches("사천 비토애풀빌라&글램핑",
+                                             "스테이빛토 풀빌라\n네이버페이\n펜션"))
+
+    def test_unrelated_hotels_are_rejected(self):
+        for card in ("9.2\n블랙 · 특급 · 호텔\n세인트존스 호텔\n강릉시강릉 강문해변 앞\n210,936\n원",
+                     "4성급\n호텔\n나인트리 바이 파르나스 서울 판교\n305,500\n원",
+                     "9.3\n블랙 · 리조트 · 호텔\n포레스트 리솜 & 레스트리\n제천시봉양역 차량 11분"):
+            self.assertFalse(search.card_matches("사천 비토애풀빌라&글램핑", card), card[:20])
+
+    def test_available_offer_is_read_from_real_card(self):
+        status, offers = search.analyze_cards(
+            "사천 비토애풀빌라&글램핑", [{"text": self.YANOLJA_SACHEON, "url": "https://y/1"}],
+            address="경남 사천시 서포면",
+        )
+        self.assertEqual(status, search.STATUS_AVAILABLE)
+        self.assertEqual(offers[0].price, "460,000원")  # 할인가가 표시된다
+        self.assertTrue(offers[0].verified)
+
+    def test_search_term_prefers_keyword(self):
+        self.assertEqual(search.search_term({"query": "비토애 럭셔리 글램핑 산청점",
+                                             "keyword": "비토애 산청"}), "비토애 산청")
+        self.assertEqual(search.search_term({"query": "소노벨 변산"}), "소노벨 변산")
+
+
 class NaverDetailTest(unittest.TestCase):
     def test_vacancy_found(self):
         text = "네이버 예약 페이지 " + ("객실 안내 " * 12) + ("기준 최대 최소 예약마감 " * 2) + "기준 최대 최소 120,000원"
@@ -183,6 +227,17 @@ class NaverDetailTest(unittest.TestCase):
         status, rooms, closed = search.analyze_naver_detail(text)
         self.assertEqual(status, search.STATUS_SOLDOUT)
         self.assertEqual((rooms, closed), (3, 3))
+
+    def test_empty_room_phrase_means_soldout(self):
+        text = ("네이버 예약 " + "객실 안내 " * 12 + "기준 최대 최소 "
+                "예약 가능한 객실이 없습니다 120,000원")
+        status, _, _ = search.analyze_naver_detail(text)
+        self.assertEqual(status, search.STATUS_SOLDOUT)
+
+    def test_available_requires_a_price(self):
+        text = "네이버 예약 페이지 " + "객실 안내 " * 20 + "기준 최대 최소 객실 소개"
+        status, _, _ = search.analyze_naver_detail(text)
+        self.assertEqual(status, search.STATUS_SOLDOUT)
 
     def test_short_page_is_unknown(self):
         status, _, _ = search.analyze_naver_detail("로딩중")
