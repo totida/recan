@@ -445,11 +445,20 @@ class Browser:
             self._driver.set_page_load_timeout(60)
         return self._driver
 
-    def collect_cards(self, url, selectors, wait=6, scrolls=2):
+    def _pick_cards(self, selectors):
+        from selenium.webdriver.common.by import By
+
+        for selector in selectors or []:
+            cards = _elements_to_cards(
+                self.driver.find_elements(By.CSS_SELECTOR, selector))
+            if cards:
+                return cards
+        # 설정한 선택자가 모두 빗나가면 링크 전체를 훑는다.
+        return _elements_to_cards(self.driver.find_elements(By.CSS_SELECTOR, "a"))
+
+    def collect_cards(self, url, selectors, wait=6, scrolls=2, retry_wait=5):
         """페이지를 열고 검색결과 카드 후보를 (텍스트, 링크)로 수집."""
         import time as _time
-
-        from selenium.webdriver.common.by import By
 
         driver = self.driver
         driver.get(url)
@@ -458,16 +467,27 @@ class Browser:
             driver.execute_script("window.scrollBy(0, document.body.scrollHeight/2);")
             _time.sleep(2)
 
-        for selector in selectors or []:
-            elements = driver.find_elements(By.CSS_SELECTOR, selector)
-            cards = _elements_to_cards(elements)
-            if len(cards) >= 1:
-                return cards
+        cards = self._pick_cards(selectors)
+        if not cards and retry_wait:
+            # 늦게 그려지는 화면(SPA)을 위해 한 번 더 기다렸다 본다.
+            _time.sleep(retry_wait)
+            driver.execute_script("window.scrollBy(0, document.body.scrollHeight/2);")
+            _time.sleep(2)
+            cards = self._pick_cards(selectors)
+        return cards
 
-        # 설정한 선택자가 모두 빗나가면 링크 전체를 훑는다.
-        return _elements_to_cards(driver.find_elements(By.CSS_SELECTOR, "a"))
+    def info(self):
+        """진단용: 실제로 열린 주소와 화면 제목, 본문 길이."""
+        from selenium.webdriver.common.by import By
 
-    def page_text(self, url, wait=7, scrolls=2):
+        try:
+            body = self.driver.find_element(By.TAG_NAME, "body").text
+        except Exception:  # noqa: BLE001
+            body = ""
+        return {"url": self.driver.current_url, "title": self.driver.title,
+                "text_length": len(body), "text_head": body[:200].replace("\n", " / ")}
+
+    def page_text(self, url, wait=10, scrolls=3):
         import time as _time
 
         from selenium.webdriver.common.by import By

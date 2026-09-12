@@ -59,7 +59,8 @@ def main():
             print(f"\n  → {url}")
             try:
                 cards = browser.collect_cards(url, lookup.get("card_selectors"),
-                                              lookup.get("wait", 5), lookup.get("scrolls", 1))
+                                              lookup.get("wait", 5),
+                                              lookup.get("scrolls", 1))
             except Exception as exc:  # noqa: BLE001
                 print(f"    ⚠️ 열지 못했습니다: {str(exc).splitlines()[0][:120]}")
                 continue
@@ -97,6 +98,12 @@ def main():
                 except Exception as exc:  # noqa: BLE001
                     print(f"      ⚠️ 열지 못했습니다: {str(exc).splitlines()[0][:120]}")
                     continue
+
+                if not cards:  # 왜 못 읽었는지(404·차단·지연) 알 수 있게
+                    state = browser.info()
+                    print(f"      ⛳ 실제 주소: {state['url'][:120]}")
+                    print(f"      ⛳ 제목: {state['title'][:80]} · 본문 {state['text_length']}자")
+                    print(f"      ⛳ 본문 앞부분: {state['text_head'][:160]}")
 
                 matched = [c for c in cards if search.card_matches(args.query, c["text"])]
                 status, offers = search.analyze_cards(args.query, cards, url, address=address)
