@@ -7,7 +7,8 @@
     "card_selectors 는 검색결과 카드 후보이며, 위에서부터 하나라도 잡히면 그것을 사용합니다.",
     "모두 실패하면 페이지 전체 링크에서 숙소 이름을 찾는 방식으로 대체합니다.",
     "follow_place: 검색 결과의 네이버 장소 링크를 따라가 객실 상태까지 확인합니다.",
-    "enabled 를 false 로 두면 해당 사이트는 건너뜁니다."
+    "enabled 를 false 로 두면 해당 사이트는 건너뜁니다.",
+    "국내 펜션·글램핑은 야놀자·네이버에, 호텔·리조트는 아고다·부킹닷컴·트립닷컴에 주로 있습니다."
   ],
   "place_lookup": {
     "_comment": "숙소 이름 → 주소 후보를 찾는 곳(네이버). 위 URL부터 차례로 시도합니다.",
@@ -96,6 +97,55 @@
       "wait": 8,
       "scrolls": 2,
       "_note": "점검 결과 검색 결과가 렌더링되지 않아 메뉴 항목만 읽힘. 대형 호텔(라한셀렉트 경주)로도 동일해서 잠시 꺼둠. 국내 펜션·글램핑 재고도 거의 없음."
+    },
+    {
+      "key": "agoda",
+      "name": "아고다",
+      "enabled": true,
+      "urls": [
+        "https://www.agoda.com/ko-kr/search?textToSearch={query}&checkIn={checkin}&los={nights}&adults={guests}",
+        "https://www.agoda.com/search?textToSearch={query}&checkIn={checkin}&los={nights}&adults={guests}"
+      ],
+      "card_selectors": [
+        "[data-selenium='hotel-item']",
+        "li[class*='PropertyCard']",
+        "a[href*='/hotel/']",
+        "li[class*='item']"
+      ],
+      "wait": 10,
+      "scrolls": 3
+    },
+    {
+      "key": "booking",
+      "name": "부킹닷컴",
+      "enabled": true,
+      "urls": [
+        "https://www.booking.com/searchresults.ko.html?ss={query}&checkin={checkin}&checkout={checkout}&group_adults={guests}&no_rooms=1",
+        "https://www.booking.com/searchresults.html?ss={query}&checkin={checkin}&checkout={checkout}&group_adults={guests}"
+      ],
+      "card_selectors": [
+        "div[data-testid='property-card']",
+        "a[data-testid='title-link']",
+        "a[href*='/hotel/']"
+      ],
+      "wait": 10,
+      "scrolls": 3
+    },
+    {
+      "key": "trip",
+      "name": "트립닷컴",
+      "enabled": true,
+      "urls": [
+        "https://kr.trip.com/hotels/list?keyword={query}&checkIn={checkin}&checkOut={checkout}&adult={guests}",
+        "https://kr.trip.com/hotels/list?keyword={query}&checkin={checkin_compact}&checkout={checkout_compact}"
+      ],
+      "card_selectors": [
+        "div[class*='hotel-card']",
+        "a[href*='/hotels/detail']",
+        "li[class*='item']"
+      ],
+      "wait": 10,
+      "scrolls": 3
     }
   ]
 }

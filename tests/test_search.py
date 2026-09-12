@@ -18,6 +18,30 @@ class MatchingTest(unittest.TestCase):
         self.assertFalse(search.card_matches("비토애 산청", "제주 신라스테이\n98,000원"))
 
 
+class ForeignPriceTest(unittest.TestCase):
+    """아고다·부킹닷컴 등 해외 사이트의 원화 표기."""
+
+    def test_won_symbol(self):
+        self.assertEqual(search.find_price("1박 ₩150,000"), "150,000원")
+
+    def test_krw_prefix(self):
+        self.assertEqual(search.find_price("KRW 98,000"), "98,000원")
+
+    def test_prefers_korean_won_suffix(self):
+        self.assertEqual(search.find_price("120,000원 · ₩999,999"), "120,000원")
+
+    def test_english_soldout(self):
+        self.assertTrue(search.is_soldout("Sold out"))
+        self.assertTrue(search.is_soldout("No rooms available for your dates"))
+
+    def test_foreign_card_becomes_offer(self):
+        card = {"text": "라한셀렉트 경주\n경주시 보문로\n8.7 훌륭해요\n₩210,000", "url": "https://a/1"}
+        status, offers = search.analyze_cards("라한셀렉트 경주", [card],
+                                              address="경상북도 경주시 보문로")
+        self.assertEqual(status, search.STATUS_AVAILABLE)
+        self.assertEqual(offers[0].price, "210,000원")
+
+
 class PriceTest(unittest.TestCase):
     def test_comma_price(self):
         self.assertEqual(search.find_price("1박 120,000원"), "120,000원")
