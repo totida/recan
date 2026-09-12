@@ -109,6 +109,64 @@ def match_score(query, text):
 SIMILARITY_THRESHOLD = 0.7
 SIMILARITY_MIN_BLOCK = 3
 
+# 해외 사이트는 숙소를 영문으로 적는다(부킹닷컴: '라한셀렉트 경주' → 'Lahan Select
+# Gyeongju'). 한글을 로마자로 바꿔 대조하되, 같은 도시의 다른 호텔
+# ('Hanwha Resort Gyeongju' 0.64)을 잘못 잡지 않도록 기준을 높게 둔다.
+ROMAN_THRESHOLD = 0.68
+ROMAN_MIN_BLOCK = 6
+ROMAN_MIN_LENGTH = 8
+ROMAN_TITLE_LINES = 2
+
+_CHO = ("g", "kk", "n", "d", "tt", "r", "m", "b", "pp", "s", "ss", "", "j", "jj",
+        "ch", "k", "t", "p", "h")
+_JUNG = ("a", "ae", "ya", "yae", "eo", "e", "yeo", "ye", "o", "wa", "wae", "oe",
+         "yo", "u", "wo", "we", "wi", "yu", "eu", "ui", "i")
+_JONG = ("", "k", "k", "k", "n", "n", "n", "t", "l", "k", "m", "l", "l", "l", "p",
+         "l", "m", "p", "p", "t", "t", "ng", "t", "t", "k", "t", "p", "t")
+
+
+def romanize(text):
+    """한글을 로마자로 옮긴다 (국어의 로마자 표기법 기준)."""
+    out = []
+    for char in text or "":
+        code = ord(char)
+        if 0xAC00 <= code <= 0xD7A3:
+            index = code - 0xAC00
+            out.append(_CHO[index // 588] + _JUNG[(index % 588) // 28]
+                       + _JONG[index % 28])
+        elif char.isalnum():
+            out.append(char.lower())
+    return "".join(out)
+
+
+def _latin_only(text):
+    return re.sub(r"[^a-z0-9]+", "", (text or "").lower())
+
+
+def _card_head(text, lines=ROMAN_TITLE_LINES):
+    """카드 맨 앞(숙소 이름이 있는 곳)만 잘라낸다.
+
+    부킹닷컴은 다른 숙소 카드에도 '13.1 miles from Lahan Select Gyeongju' 처럼
+    기준 숙소 이름을 적어두기 때문에, 본문 전체로 대조하면 엉뚱한 숙소가 걸린다.
+    """
+    head = [line.strip() for line in (text or "").splitlines() if line.strip()]
+    return " ".join(head[:lines])[:80]
+
+
+def roman_matches(query, text):
+    """영문으로 적힌 카드를 한글 이름과 대조 (카드 맨 앞 줄 기준)."""
+    roman_query = romanize(query)
+    latin_text = _latin_only(_card_head(text))
+    if len(roman_query) < ROMAN_MIN_LENGTH or len(latin_text) < ROMAN_MIN_LENGTH:
+        return False
+    blocks = [b for b in difflib.SequenceMatcher(None, roman_query, latin_text,
+                                                 autojunk=False)
+              .get_matching_blocks() if b.size]
+    if not blocks:
+        return False
+    ratio = sum(b.size for b in blocks) / len(roman_query)
+    return ratio >= ROMAN_THRESHOLD and max(b.size for b in blocks) >= ROMAN_MIN_BLOCK
+
 
 def similarity(query, text):
     """글자 단위 유사도 (일치 비율, 가장 긴 연속 일치 길이).
@@ -136,8 +194,9 @@ def card_matches(query, text, threshold=0.6):
         return True
     tokens = sorted(query_tokens(query), key=len, reverse=True)
     if tokens and len(normalize(tokens[0])) >= 3:
-        return normalize(tokens[0]) in normalize(text)
-    return False
+        if normalize(tokens[0]) in normalize(text):
+            return True
+    return roman_matches(query, text)
 
 
 def is_soldout(text):

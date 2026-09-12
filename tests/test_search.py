@@ -239,6 +239,40 @@ class FuzzyMatchTest(unittest.TestCase):
         self.assertEqual(search.search_term({"query": "소노벨 변산"}), "소노벨 변산")
 
 
+class RomanizedMatchTest(unittest.TestCase):
+    """해외 사이트가 영문으로 적은 숙소를 한글 이름과 대조."""
+
+    BOOKING_TARGET = ("Lahan Select Gyeongju\nUnavailable\n"
+                      "Too late – no availability for your selected dates at this property!")
+    BOOKING_OTHER = ("Benikea Hotel Pohang\nScored 8.2\n"
+                     "Pohang • 13.1 miles from Lahan Select Gyeongju\nPer night ₩84,000")
+
+    def test_romanize(self):
+        self.assertEqual(search.romanize("경주"), "gyeongju")
+        self.assertEqual(search.romanize("서울"), "seoul")
+
+    def test_english_listing_matches(self):
+        self.assertTrue(search.card_matches("라한셀렉트 경주", self.BOOKING_TARGET))
+        self.assertTrue(search.card_matches("롯데호텔 서울", "Lotte Hotel Seoul\n₩300,000"))
+        self.assertTrue(search.card_matches("신라스테이 서대문",
+                                            "Shilla Stay Seodaemun\n₩120,000"))
+
+    def test_nearby_reference_is_not_a_match(self):
+        # 다른 숙소 카드에 '13.1 miles from Lahan Select Gyeongju' 가 적혀 있어도
+        # 그 숙소로 보면 안 된다.
+        self.assertFalse(search.card_matches("라한셀렉트 경주", self.BOOKING_OTHER))
+
+    def test_different_hotel_in_same_city_is_rejected(self):
+        self.assertFalse(search.card_matches("라한셀렉트 경주",
+                                             "Hanwha Resort Gyeongju\n8.5\n₩150,000"))
+        self.assertFalse(search.card_matches("비토애 산청", "Jeju Shilla Stay\n₩98,000"))
+
+    def test_english_soldout_listing_reads_as_soldout(self):
+        status, _ = search.analyze_cards("라한셀렉트 경주",
+                                         [{"text": self.BOOKING_TARGET}])
+        self.assertEqual(status, search.STATUS_SOLDOUT)
+
+
 class NaverDetailTest(unittest.TestCase):
     def test_vacancy_found(self):
         text = "네이버 예약 페이지 " + ("객실 안내 " * 12) + ("기준 최대 최소 예약마감 " * 2) + "기준 최대 최소 120,000원"
