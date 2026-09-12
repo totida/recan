@@ -84,33 +84,55 @@ def main():
         watch = {"query": args.query, "checkin": args.checkin, "checkout": args.checkout,
                  "guests": args.guests, "address": address}
         for site in search.load_sites():
-            url = search.build_url(site["url"], args.query, args.checkin,
-                                   args.checkout, args.guests)
             print("\n" + "=" * 70)
-            print(f"🏨 {site['name']}\n  → {url}")
-            try:
-                cards = browser.collect_cards(url, site.get("card_selectors"),
-                                              site.get("wait", 6), site.get("scrolls", 2))
-            except Exception as exc:  # noqa: BLE001
-                print(f"  ⚠️ 열지 못했습니다: {str(exc).splitlines()[0][:120]}")
-                problems.append(f"{site['name']}: 페이지를 열지 못함")
-                continue
+            print(f"🏨 {site['name']}")
+            best = None
+            for index, template in enumerate(search.site_urls(site), start=1):
+                url = search.build_url(template, args.query, args.checkin,
+                                       args.checkout, args.guests)
+                print(f"\n  [{index}] {url}")
+                try:
+                    cards = browser.collect_cards(url, site.get("card_selectors"),
+                                                  site.get("wait", 6), site.get("scrolls", 2))
+                except Exception as exc:  # noqa: BLE001
+                    print(f"      ⚠️ 열지 못했습니다: {str(exc).splitlines()[0][:120]}")
+                    continue
 
-            status, offers = search.analyze_cards(args.query, cards, url, address=address)
-            matched = [c for c in cards if search.card_matches(args.query, c["text"])]
-            print(f"  카드 {len(cards)}개 · 이름 일치 {len(matched)}개 → {LABEL.get(status, status)}")
-            if args.dump:
-                preview(cards)
-            elif matched:
-                preview(matched)
-            for offer in offers:
-                mark = {True: "주소 일치", False: "주소 미확인", None: "주소 미등록"}[offer.verified]
-                print(f"      ✅ {offer.title} {offer.price} ({mark})")
+                matched = [c for c in cards if search.card_matches(args.query, c["text"])]
+                status, offers = search.analyze_cards(args.query, cards, url, address=address)
+                print(f"      카드 {len(cards)}개 · 이름 일치 {len(matched)}개 "
+                      f"→ {LABEL.get(status, status)}")
+                if args.dump or matched:
+                    preview(matched or cards)
+                for offer in offers:
+                    mark = {True: "주소 일치", False: "주소 미확인",
+                            None: "주소 미등록"}[offer.verified]
+                    print(f"      ✅ {offer.title} {offer.price} ({mark})")
 
-            if not cards:
+                if site.get("follow_place"):
+                    place_url = search.first_place_link(args.query, cards)
+                    if place_url:
+                        print(f"      ↪ 장소 페이지 확인: {place_url}")
+                        detail = search.naver_detail_result(browser, watch, place_url,
+                                                            site["name"])
+                        print(f"        → {LABEL.get(detail.status, detail.status)}"
+                              f" ({detail.note})")
+                        best = ("ok", url)
+                        break
+
+                if matched:
+                    best = ("ok", url)
+                    break
+                best = best or ("none" if cards else "empty", url)
+
+            if best is None:
+                problems.append(f"{site['name']}: 모든 주소에서 페이지를 열지 못함")
+            elif best[0] == "empty":
                 problems.append(f"{site['name']}: 카드를 하나도 못 읽음 → card_selectors 확인")
-            elif not matched:
-                problems.append(f"{site['name']}: 검색 결과에 숙소가 없음 → url 형식 또는 검색어 확인")
+            elif best[0] == "none":
+                problems.append(f"{site['name']}: 검색 결과에 숙소가 없음 → urls 형식 확인")
+            else:
+                print(f"\n  ✅ 사용 가능한 주소: {best[1]}")
     finally:
         browser.quit()
 
