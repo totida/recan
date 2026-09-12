@@ -40,9 +40,12 @@ NOISE_WORDS = {
 # 사이트가 직접 '결과 없음'이라고 알려주는 문구 — 취급하지 않는 숙소라는 뜻이다.
 EMPTY_RESULT_PHRASES = (
     "검색 결과가 없", "검색결과가 없", "결과가 없어요", "일치하는 숙소가 없",
-    "조건에 맞는 숙소가 없", "찾으시는 숙소가 없", "검색결과 0", "검색 결과 0",
-    "no properties found", "no results found", "0 properties",
+    "조건에 맞는 숙소가 없", "찾으시는 숙소가 없",
+    "no properties found", "no results found",
 )
+# 카드가 이만큼 넘게 떠 있으면 '결과 없음' 문구가 있어도 화면 어딘가의
+# 안내 문구일 뿐이므로 미취급으로 단정하지 않는다.
+EMPTY_RESULT_MAX_CARDS = 3
 NOT_LISTED_NOTE = "이 사이트에는 없는 숙소예요"
 
 STATUS_AVAILABLE = "available"
@@ -670,7 +673,8 @@ def _search_site(browser, watch, site):
         # 사이트가 '검색 결과가 없어요'라고 답했다면 설정 문제가 아니라
         # 그 숙소를 취급하지 않는 것이다. 다른 주소를 더 시도할 이유가 없다.
         reader = getattr(browser, "body_text", None)
-        if reader and any(phrase in reader() for phrase in EMPTY_RESULT_PHRASES):
+        if (reader and len(cards) <= EMPTY_RESULT_MAX_CARDS
+                and any(phrase in reader() for phrase in EMPTY_RESULT_PHRASES)):
             return SiteResult(site["key"], site["name"], STATUS_NONE, url,
                               note=NOT_LISTED_NOTE)
     return result

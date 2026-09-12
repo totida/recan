@@ -407,6 +407,15 @@ class SearchRunTest(unittest.TestCase):
         self.assertIn("미취급", fake.text())
         self.assertIn("이 사이트에는 없는 숙소예요", fake.text())
 
+    def test_many_cards_are_not_called_not_listed(self):
+        """결과가 잔뜩 떠 있으면 '결과 없음' 문구가 있어도 미취급으로 단정하지 않는다."""
+        cards = [{"text": f"다른 숙소 {i}\n80,000원"} for i in range(10)]
+        browser = FakeBrowser(cards=cards, body="조건에 맞는 숙소가 없어요 (필터 안내)")
+        self.watch["force"] = True
+        with FakeTelegram() as fake:
+            self.run_search(browser)
+        self.assertNotIn("미취급", fake.text())
+
     def test_site_error_is_reported_not_raised(self):
         class BrokenBrowser(FakeBrowser):
             def collect_cards(self, *args, **kwargs):
