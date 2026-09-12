@@ -42,8 +42,8 @@
         "a[href*='/product/']",
         "li[class*='item']"
       ],
-      "wait": 6,
-      "scrolls": 2
+      "wait": 10,
+      "scrolls": 3
     },
     {
       "key": "yanolja",
