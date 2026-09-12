@@ -130,7 +130,9 @@ def main():
                 if matched:
                     best = ("ok", url)
                     break
-                if any(p in browser.body_text() for p in search.EMPTY_RESULT_PHRASES):
+                if (len(cards) <= search.EMPTY_RESULT_MAX_CARDS
+                        and any(p in browser.body_text()
+                                for p in search.EMPTY_RESULT_PHRASES)):
                     print(f"      🚫 이 사이트에는 없는 숙소입니다 (검색은 정상 동작)")
                     best = ("not_listed", url)
                     break

@@ -137,15 +137,16 @@
       "enabled": true,
       "urls": [
         "https://kr.trip.com/hotels/list?keyword={query}&checkIn={checkin}&checkOut={checkout}&adult={guests}",
-        "https://kr.trip.com/hotels/list?keyword={query}&checkin={checkin_compact}&checkout={checkout_compact}"
+        "https://kr.trip.com/hotels/list?city=0&keyword={query}&checkin={checkin_compact}&checkout={checkout_compact}",
+        "https://www.trip.com/hotels/list?keyword={query}&checkIn={checkin}&checkOut={checkout}"
       ],
       "card_selectors": [
         "div[class*='hotel-card']",
         "a[href*='/hotels/detail']",
         "li[class*='item']"
       ],
-      "wait": 10,
-      "scrolls": 3
+      "wait": 15,
+      "scrolls": 4
     }
   ]
 }
