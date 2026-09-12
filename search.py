@@ -21,9 +21,13 @@ PROVIDER_FILE = os.environ.get("PROVIDER_FILE", "providers.json")
 SOLDOUT_KEYWORDS = (
     "예약마감", "판매마감", "마감", "매진", "솔드아웃", "sold out", "soldout",
     "판매완료", "예약불가", "만실", "품절", "객실없음", "잔여없음", "예약종료",
+    "no rooms", "not available", "unavailable", "fully booked", "매진임박아님",
 )
 
 PRICE_RE = re.compile(r"(\d{1,3}(?:,\d{3})+|\d{4,8})\s*원")
+# 아고다·부킹닷컴 등은 ₩ 또는 KRW 로 적는다.
+PRICE_SYMBOL_RE = re.compile(r"[₩]\s*(\d{1,3}(?:,\d{3})+|\d{4,8})")
+PRICE_KRW_RE = re.compile(r"(?:KRW|krw)\s*(\d{1,3}(?:,\d{3})+|\d{4,8})")
 NOISE_LINE_RE = re.compile(r"^(\d|[₩$(]|리뷰|평점|후기|쿠폰|할인|무료|광고|AD|배지)")
 # 사이트마다 카드 맨 위에 붙는 분류/버튼 문구 — 숙소 이름이 아니다.
 NOISE_WORDS = {
@@ -36,7 +40,8 @@ NOISE_WORDS = {
 # 사이트가 직접 '결과 없음'이라고 알려주는 문구 — 취급하지 않는 숙소라는 뜻이다.
 EMPTY_RESULT_PHRASES = (
     "검색 결과가 없", "검색결과가 없", "결과가 없어요", "일치하는 숙소가 없",
-    "조건에 맞는 숙소가 없", "찾으시는 숙소가 없",
+    "조건에 맞는 숙소가 없", "찾으시는 숙소가 없", "검색결과 0", "검색 결과 0",
+    "no properties found", "no results found", "0 properties",
 )
 NOT_LISTED_NOTE = "이 사이트에는 없는 숙소예요"
 
@@ -138,13 +143,15 @@ def is_soldout(text):
 
 
 def find_price(text):
-    match = PRICE_RE.search(text or "")
-    if not match:
-        return ""
-    raw = match.group(1)
-    if "," not in raw:
-        raw = f"{int(raw):,}"
-    return f"{raw}원"
+    """카드에서 가격을 읽는다. 원 / ₩ / KRW 표기를 모두 지원."""
+    for pattern in (PRICE_RE, PRICE_SYMBOL_RE, PRICE_KRW_RE):
+        match = pattern.search(text or "")
+        if match:
+            raw = match.group(1)
+            if "," not in raw:
+                raw = f"{int(raw):,}"
+            return f"{raw}원"
+    return ""
 
 
 def _title_candidates(text):
@@ -235,7 +242,7 @@ def verification_flag(score):
 def looks_like_address(line):
     """'경상남도 …', '산청군 신안면' 같은 줄만 주소로 인정한다."""
     line = (line or "").strip()
-    if len(line) < 4 or PRICE_RE.search(line):
+    if len(line) < 4 or find_price(line):
         return False
     if PROVINCE_RE.match(line):
         return True
@@ -567,7 +574,7 @@ def analyze_naver_detail(page_text):
         return STATUS_SOLDOUT, room_count, closed
     if room_count == 0:
         return STATUS_UNKNOWN, 0, closed
-    if closed < room_count and PRICE_RE.search(page_text):
+    if closed < room_count and find_price(page_text):
         return STATUS_AVAILABLE, room_count, closed
     return STATUS_SOLDOUT, room_count, closed
 
@@ -596,7 +603,7 @@ def naver_detail_result(browser, watch, place_url, name="네이버 예약"):
         note = f"객실 {rooms}개 중 {closed}개 마감"
     elif closed:
         note = f"예약마감 {closed}건"
-    elif len(page) > 300 and not PRICE_RE.search(page):
+    elif len(page) > 300 and not find_price(page):
         note = "네이버 예약을 쓰지 않는 숙소 같아요"
     else:
         note = "객실 정보를 읽지 못했어요"
