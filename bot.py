@@ -135,7 +135,8 @@ def _extract_url(text):
     return next((word for word in text.split() if word.startswith("http")), None)
 
 
-def register_watch(chat, query, checkin, checkout, guests, url=None, address=""):
+def register_watch(chat, query, checkin, checkout, guests, url=None, address="",
+                   keyword=""):
     """감시 항목 등록. (watch, 안내문) 반환."""
     if len(chat["watches"]) >= MAX_WATCHES:
         return None, (f"알림은 최대 {MAX_WATCHES}개까지 등록할 수 있어요. "
@@ -151,11 +152,14 @@ def register_watch(chat, query, checkin, checkout, guests, url=None, address="")
         ):
             return None, f"이미 등록된 알림이에요: {query} ({ci} → {co})"
 
-    watch = storage.new_watch(query, ci, co, guests, url, address)
+    watch = storage.new_watch(query, ci, co, guests, url, address, keyword)
     watch["force"] = True  # 등록 직후 한 번 바로 검색
     chat["watches"].append(watch)
     nights = dateparse.nights_between(ci, co)
     address_line = f"📍 {address}\n" if address else ""
+    keyword_line = (f"🔎 검색어: {keyword}\n"
+                    if keyword and search.normalize(keyword) != search.normalize(query)
+                    else "")
     verify_line = (
         "예약사이트 검색 결과도 이 주소와 대조해서 같은 숙소인지 확인할게요.\n"
         if address
@@ -165,6 +169,7 @@ def register_watch(chat, query, checkin, checkout, guests, url=None, address="")
         f"✅ 등록 완료!\n"
         f"🏨 {query}\n"
         f"{address_line}"
+        f"{keyword_line}"
         f"📅 {ci} → {co} ({nights}박 · {guests}명)\n\n"
         f"{verify_line}"
         "여기어때 · 야놀자 · 네이버 예약 · 하나투어를 1시간마다 검색할게요.\n"
@@ -180,7 +185,7 @@ def _start_registration(chat, query, guests, today, url=None,
                         checkin=None, checkout=None, lookup=None):
     """숙소 이름을 받은 뒤 네이버에서 후보를 찾아 되묻는다."""
     state = {
-        "query": query, "guests": guests, "url": url,
+        "query": query, "keyword": query, "guests": guests, "url": url,
         "checkin": checkin, "checkout": checkout,
         "address": "", "address_source": "",
     }
@@ -277,7 +282,7 @@ def _finish(chat, state, edit=False):
         _, message = register_watch(
             chat, state["query"], state["checkin"], state["checkout"],
             state.get("guests", DEFAULT_GUESTS), state.get("url"),
-            state.get("address", ""),
+            state.get("address", ""), state.get("keyword", ""),
         )
         return [reply(message, edit=edit)]
     return _ask_confirm(chat, state, edit=edit)
@@ -290,9 +295,12 @@ def _pick_candidate(chat, state, index, today, edit=False):
     chosen = candidates[index]
     name = chosen.get("name") or state["query"]
     # 네이버 표기 이름이 엉뚱하면 사용자가 적은 이름을 그대로 쓴다.
-    if not search.card_matches(state["query"], name):
+    if not search.card_matches(state.get("keyword") or state["query"], name):
         name = state["query"]
-    state["query"] = name
+    state["query"] = name  # 표시용 이름(정식 명칭)
+    # 검색어는 사용자가 처음 적은 짧은 이름을 유지한다.
+    # 정식 명칭이 길면 다른 예약사이트에서 오히려 검색이 안 되기 때문.
+    state.setdefault("keyword", state["query"])
     state["address"] = chosen.get("address", "")
     state["address_source"] = "naver"
     if chosen.get("url"):
@@ -449,7 +457,7 @@ def _confirm_yes(chat, state, edit=False):
     _, message = register_watch(
         chat, state["query"], state["checkin"], state["checkout"],
         state.get("guests", DEFAULT_GUESTS), state.get("url"),
-        state.get("address", ""),
+        state.get("address", ""), state.get("keyword", ""),
     )
     return [reply(message, edit=edit)]
 

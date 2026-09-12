@@ -31,16 +31,16 @@
       "name": "여기어때",
       "enabled": true,
       "urls": [
-        "https://www.goodchoice.kr/search?keyword={query}&checkIn={checkin}&checkOut={checkout}&personal={guests}",
-        "https://www.goodchoice.kr/search/keyword?keyword={query}&checkIn={checkin}&checkOut={checkout}",
-        "https://m.goodchoice.kr/search?keyword={query}",
+        "https://www.yeogi.com/domestic-accommodations?keyword={query}&checkIn={checkin}&checkOut={checkout}&personal={guests}",
+        "https://www.yeogi.com/search?keyword={query}&checkIn={checkin}&checkOut={checkout}&personal={guests}",
+        "https://www.yeogi.com/domestic-accommodations/search?keyword={query}&checkIn={checkin}&checkOut={checkout}",
         "https://www.goodchoice.kr/product/search/2?keyword={query}&sel_date={checkin}&sel_date2={checkout}&persons={guests}"
       ],
       "card_selectors": [
+        "a[href*='/domestic-accommodations/']",
         "a[href*='/space/']",
         "a[href*='/product/']",
-        "li[class*='item']",
-        "div[class*='card']"
+        "li[class*='item']"
       ],
       "wait": 6,
       "scrolls": 2
@@ -82,7 +82,7 @@
     {
       "key": "hanatour",
       "name": "하나투어",
-      "enabled": true,
+      "enabled": false,
       "urls": [
         "https://m.hanatour.com/hotel/domestic/search?keyword={query}&checkInDate={checkin_compact}&checkOutDate={checkout_compact}&adultCount={guests}",
         "https://www.hanatour.com/hotel/search?keyword={query}&checkInDate={checkin_compact}&checkOutDate={checkout_compact}&adultCount={guests}",
@@ -94,7 +94,8 @@
         "div[class*='card']"
       ],
       "wait": 8,
-      "scrolls": 2
+      "scrolls": 2,
+      "_note": "점검 결과 검색 결과가 렌더링되지 않아 메뉴 항목만 읽힘. 대형 호텔(라한셀렉트 경주)로도 동일해서 잠시 꺼둠. 국내 펜션·글램핑 재고도 거의 없음."
     }
   ]
 }
