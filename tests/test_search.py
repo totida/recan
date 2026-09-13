@@ -239,6 +239,32 @@ class FuzzyMatchTest(unittest.TestCase):
         self.assertEqual(search.search_term({"query": "소노벨 변산"}), "소노벨 변산")
 
 
+class PlaceCandidateTest(unittest.TestCase):
+    """네이버 후보 목록 정리 (실제 점검 로그 기준)."""
+
+    CARDS = [
+        {"text": "한우산별천지기타숙박업\n경상남도 의령군 궁류면 한우산길 688", "url": ""},
+        {"text": "라한셀렉트 경주호텔\n경상북도 경주시 보문로 338", "url": ""},
+        {"text": "라한셀렉트 경주지하주차장주차장\n경상북도 경주시 보문로 338", "url": ""},
+        {"text": "라한셀렉트 경주 마켓338양식\n경상북도 경주시 보문로 338", "url": ""},
+    ]
+
+    def test_business_category_suffix_removed(self):
+        self.assertEqual(search.clean_place_name("한우산별천지기타숙박업"), "한우산별천지")
+        self.assertEqual(search.clean_place_name("비토애 산청점부속시설"), "비토애 산청점")
+
+    def test_real_name_is_kept(self):
+        self.assertEqual(search.clean_place_name("라한셀렉트 경주호텔"), "라한셀렉트 경주호텔")
+
+    def test_parking_and_restaurants_are_dropped(self):
+        names = [c["name"] for c in search.parse_place_cards("라한셀렉트 경주", self.CARDS)]
+        self.assertEqual(names, ["라한셀렉트 경주호텔"])
+
+    def test_lodging_candidate_is_kept(self):
+        names = [c["name"] for c in search.parse_place_cards("한우산 별천지", self.CARDS[:1])]
+        self.assertEqual(names, ["한우산별천지"])
+
+
 class RomanizedMatchTest(unittest.TestCase):
     """해외 사이트가 영문으로 적은 숙소를 한글 이름과 대조."""
 
@@ -256,6 +282,12 @@ class RomanizedMatchTest(unittest.TestCase):
         self.assertTrue(search.card_matches("롯데호텔 서울", "Lotte Hotel Seoul\n₩300,000"))
         self.assertTrue(search.card_matches("신라스테이 서대문",
                                             "Shilla Stay Seodaemun\n₩120,000"))
+
+    def test_distance_line_is_not_a_match(self):
+        """'15.4 miles from Lahan Select Gyeongju' 가 적힌 다른 숙소 카드."""
+        card = ("노을이 아름다운 호미곶 캠핑카\nSup'sil • 15.4 miles from Lahan Select "
+                "Gyeongju\nPer night ₩84,000")
+        self.assertFalse(search.card_matches("라한셀렉트 경주", card))
 
     def test_nearby_reference_is_not_a_match(self):
         # 다른 숙소 카드에 '13.1 miles from Lahan Select Gyeongju' 가 적혀 있어도

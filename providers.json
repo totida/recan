@@ -101,7 +101,7 @@
     {
       "key": "agoda",
       "name": "아고다",
-      "enabled": true,
+      "enabled": false,
       "urls": [
         "https://www.agoda.com/ko-kr/search?textToSearch={query}&checkIn={checkin}&los={nights}&adults={guests}",
         "https://www.agoda.com/search?textToSearch={query}&checkIn={checkin}&los={nights}&adults={guests}"
@@ -113,7 +113,8 @@
         "li[class*='item']"
       ],
       "wait": 10,
-      "scrolls": 3
+      "scrolls": 3,
+      "_note": "점검 3회 모두 카드는 읽히나 해당 숙소가 결과에 없음. 지역 코드 기반 검색이 필요해 보여 꺼둠."
     },
     {
       "key": "booking",
@@ -134,7 +135,7 @@
     {
       "key": "trip",
       "name": "트립닷컴",
-      "enabled": true,
+      "enabled": false,
       "urls": [
         "https://kr.trip.com/hotels/list?keyword={query}&checkIn={checkin}&checkOut={checkout}&adult={guests}",
         "https://kr.trip.com/hotels/list?city=0&keyword={query}&checkin={checkin_compact}&checkout={checkout_compact}",
@@ -146,7 +147,8 @@
         "li[class*='item']"
       ],
       "wait": 15,
-      "scrolls": 4
+      "scrolls": 4,
+      "_note": "점검 3회 모두 검색 결과가 그려지지 않음(필터 UI 900자만 읽힘). 대기 15초·주소 3개를 시도해도 동일해 꺼둠."
     }
   ]
 }
