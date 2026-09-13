@@ -416,6 +416,13 @@ class SearchRunTest(unittest.TestCase):
             self.run_search(browser)
         self.assertNotIn("미취급", fake.text())
 
+    def test_unknown_status_explains_itself(self):
+        """가격이 안 보이는 카드는 왜 판정을 못 했는지 알려준다."""
+        self.watch["force"] = True
+        with FakeTelegram() as fake:
+            self.run_search(FakeBrowser(cards=[{"text": "비토애 산청\n산청군 시천면\n펜션"}]))
+        self.assertIn("가격 표시가 없어", fake.text())
+
     def test_site_error_is_reported_not_raised(self):
         class BrokenBrowser(FakeBrowser):
             def collect_cards(self, *args, **kwargs):

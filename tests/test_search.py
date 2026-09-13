@@ -53,6 +53,23 @@ class PriceTest(unittest.TestCase):
         self.assertEqual(search.find_price("리뷰 152"), "")
 
 
+class YeogiSoldOutTest(unittest.TestCase):
+    """여기어때는 그 날짜에 안 파는 숙소에 가격 대신 '다른 날짜 확인' 을 띄운다."""
+
+    CARD = ("5성급\n리조트\n쏠비치 남해\n남해군 미조면\n9.5\n1,204명 평가\n다른 날짜 확인")
+
+    def test_other_date_notice_is_soldout(self):
+        self.assertTrue(search.is_soldout("다른 날짜 확인"))
+        status, offers = search.analyze_cards("쏠비치 남해", [{"text": self.CARD}])
+        self.assertEqual(status, search.STATUS_SOLDOUT)
+        self.assertEqual(offers, [])
+
+    def test_priced_card_still_available(self):
+        card = "5성급\n리조트\n쏠비치 남해\n남해군 미조면\n250,000원"
+        status, _ = search.analyze_cards("쏠비치 남해", [{"text": card}])
+        self.assertEqual(status, search.STATUS_AVAILABLE)
+
+
 class AnalyzeCardsTest(unittest.TestCase):
     def test_available_card(self):
         cards = [
