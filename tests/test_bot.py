@@ -437,6 +437,12 @@ class SearchRunTest(unittest.TestCase):
         self.assertIn("빈 객실 있음", fake.text())
 
 
+class LogMaskTest(unittest.TestCase):
+    def test_chat_id_is_masked(self):
+        self.assertEqual(bot.mask("652517175"), "…7175")
+        self.assertEqual(bot.mask(123), "…")
+
+
 class StorageTest(unittest.TestCase):
     def test_legacy_migration(self):
         legacy = {

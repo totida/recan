@@ -71,6 +71,12 @@ HELP_TEXT = (
 )
 
 
+def mask(chat_id):
+    """공개 저장소의 실행 로그에 채팅 ID가 그대로 남지 않도록 가린다."""
+    chat_id = str(chat_id)
+    return f"…{chat_id[-4:]}" if len(chat_id) > 4 else "…"
+
+
 def reply(text, keyboard=None, edit=False):
     """봇이 보낼 한 건의 응답. edit=True 면 누른 메시지를 그 자리에서 고친다."""
     return {"text": text, "keyboard": keyboard, "edit": edit}
@@ -574,7 +580,7 @@ def process_updates(db, browser=None, timeout=0):
             try:
                 replies = handle_callback(db, chat_id, callback.get("data", ""))
             except Exception as exc:  # noqa: BLE001
-                print(f"⚠️ 버튼 처리 오류(chat {chat_id}): {exc}")
+                print(f"⚠️ 버튼 처리 오류(chat {mask(chat_id)}): {exc}")
                 replies = [reply("처리 중 문제가 생겼어요 😢 다시 시도해 주세요.")]
             _send_replies(chat_id, replies, message.get("message_id"))
             continue
@@ -587,7 +593,7 @@ def process_updates(db, browser=None, timeout=0):
         try:
             replies = handle_text(db, chat_id, text, lookup=lookup)
         except Exception as exc:  # noqa: BLE001 - 한 명의 오류가 전체를 멈추지 않도록
-            print(f"⚠️ 메시지 처리 오류(chat {chat_id}): {exc}")
+            print(f"⚠️ 메시지 처리 오류(chat {mask(chat_id)}): {exc}")
             replies = [reply("처리 중 문제가 생겼어요 😢 다시 한 번 보내주시겠어요?")]
         _send_replies(chat_id, replies)
 
@@ -662,7 +668,7 @@ def run_due_searches(db, now=None, today=None, browser=None):
         for chat_id, watch in due:
             forced = bool(watch.get("force"))
             print(f"🔎 검색: {watch['query']} {watch['checkin']}~{watch['checkout']} "
-                  f"(chat {chat_id})")
+                  f"(chat {mask(chat_id)})")
             results = search.search_watch(browser, watch, sites)
             for result in results:
                 print(f"   - {result.name}: {result.status} "
