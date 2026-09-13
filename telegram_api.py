@@ -79,7 +79,7 @@ def send_message(chat_id, text, preview=False, keyboard=None):
             result = _call("sendMessage", params)
             message_id = (result or {}).get("message_id")
         except TelegramError as exc:
-            print(f"⚠️ 메시지 전송 실패(chat {chat_id}): {exc}")
+            print(f"⚠️ 메시지 전송 실패(chat …{str(chat_id)[-4:]}): {exc}")
             return None
     return message_id
 
@@ -94,7 +94,7 @@ def edit_message(chat_id, message_id, text, keyboard=None):
         _call("editMessageText", params, retries=1)
         return True
     except TelegramError as exc:
-        print(f"⚠️ 메시지 수정 실패(chat {chat_id}): {exc}")
+        print(f"⚠️ 메시지 수정 실패(chat …{str(chat_id)[-4:]}): {exc}")
         return False
 
 

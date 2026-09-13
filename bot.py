@@ -23,11 +23,13 @@ NOTIFY_INTERVAL = int(os.environ.get("NOTIFY_INTERVAL_MIN", "60")) * 60
 MAX_WATCHES = int(os.environ.get("MAX_WATCHES", "10"))
 DEFAULT_GUESTS = 2
 
-# 대화가 오가는 동안에는 long polling 으로 버튼에 즉시 반응하고,
-# 조용하면 곧바로 종료해 GitHub Actions 사용 시간을 아낀다.
+# 실행 방식은 두 가지다.
+#   IDLE_EXIT_SEC > 0 : 조용하면 곧바로 종료 (비공개 저장소·사용 시간 절약)
+#   IDLE_EXIT_SEC = 0 : 대화가 없어도 MAX_RUN_SEC 까지 계속 켜둔다 (상시 대기)
 POLL_TIMEOUT = int(os.environ.get("POLL_TIMEOUT_SEC", "20"))
 IDLE_EXIT = int(os.environ.get("IDLE_EXIT_SEC", "60"))
 MAX_RUN = int(os.environ.get("MAX_RUN_SEC", "300"))
+ALWAYS_ON = IDLE_EXIT <= 0
 
 STATUS_ICON = {
     search.STATUS_AVAILABLE: "✅",
@@ -67,6 +69,12 @@ HELP_TEXT = (
     "  취소 — 입력 중이던 등록 취소\n"
     "  도움말 — 이 안내 다시 보기"
 )
+
+
+def mask(chat_id):
+    """공개 저장소의 실행 로그에 채팅 ID가 그대로 남지 않도록 가린다."""
+    chat_id = str(chat_id)
+    return f"…{chat_id[-4:]}" if len(chat_id) > 4 else "…"
 
 
 def reply(text, keyboard=None, edit=False):
@@ -572,7 +580,7 @@ def process_updates(db, browser=None, timeout=0):
             try:
                 replies = handle_callback(db, chat_id, callback.get("data", ""))
             except Exception as exc:  # noqa: BLE001
-                print(f"⚠️ 버튼 처리 오류(chat {chat_id}): {exc}")
+                print(f"⚠️ 버튼 처리 오류(chat {mask(chat_id)}): {exc}")
                 replies = [reply("처리 중 문제가 생겼어요 😢 다시 시도해 주세요.")]
             _send_replies(chat_id, replies, message.get("message_id"))
             continue
@@ -585,7 +593,7 @@ def process_updates(db, browser=None, timeout=0):
         try:
             replies = handle_text(db, chat_id, text, lookup=lookup)
         except Exception as exc:  # noqa: BLE001 - 한 명의 오류가 전체를 멈추지 않도록
-            print(f"⚠️ 메시지 처리 오류(chat {chat_id}): {exc}")
+            print(f"⚠️ 메시지 처리 오류(chat {mask(chat_id)}): {exc}")
             replies = [reply("처리 중 문제가 생겼어요 😢 다시 한 번 보내주시겠어요?")]
         _send_replies(chat_id, replies)
 
@@ -651,7 +659,7 @@ def run_due_searches(db, now=None, today=None, browser=None):
         telegram_api.send_message(chat_id, message)
 
     if not due:
-        return
+        return False
 
     sites = search.load_sites()
     owns_browser = browser is None
@@ -660,7 +668,7 @@ def run_due_searches(db, now=None, today=None, browser=None):
         for chat_id, watch in due:
             forced = bool(watch.get("force"))
             print(f"🔎 검색: {watch['query']} {watch['checkin']}~{watch['checkout']} "
-                  f"(chat {chat_id})")
+                  f"(chat {mask(chat_id)})")
             results = search.search_watch(browser, watch, sites)
             for result in results:
                 print(f"   - {result.name}: {result.status} "
@@ -686,6 +694,7 @@ def run_due_searches(db, now=None, today=None, browser=None):
     finally:
         if owns_browser:
             browser.quit()
+    return True
 
 
 def main():
@@ -694,27 +703,34 @@ def main():
     browser = search.Browser()  # 크롬은 실제로 필요할 때만 뜬다
     started = time.time()
     last_activity = None
-    timeout = 0  # 첫 조회는 기다리지 않는다
+    timeout = POLL_TIMEOUT if ALWAYS_ON else 0  # 상시 대기면 처음부터 기다린다
+    if ALWAYS_ON:
+        print(f"🟢 상시 대기 모드 (최대 {MAX_RUN // 60}분, 검색 주기 "
+              f"{SEARCH_INTERVAL // 60}분)")
     try:
         while True:
             handled = process_updates(db, browser, timeout=timeout)
             if handled:
                 last_activity = time.time()
-            run_due_searches(db, browser=browser)
+            searched = run_due_searches(db, browser=browser)
             storage.save_db(db)
+            storage.persist()
+            if searched and ALWAYS_ON:
+                browser.quit()  # 오래 켜둘 때 크롬이 메모리를 물고 있지 않도록
 
             now = time.time()
-            if last_activity is None:
-                break  # 대화가 없으면 바로 종료 (실행 시간 절약)
-            if now - last_activity >= IDLE_EXIT or now - started >= MAX_RUN:
+            if now - started >= MAX_RUN:
                 break
-            if POLL_TIMEOUT <= 0:
-                break
-            timeout = POLL_TIMEOUT  # 대화 중에는 long polling 으로 즉시 반응
-            print(f"⏱️ 대화 중 — 최대 {timeout}초 더 기다립니다")
+            if not ALWAYS_ON:
+                if last_activity is None:
+                    break  # 대화가 없으면 바로 종료 (실행 시간 절약)
+                if now - last_activity >= IDLE_EXIT or POLL_TIMEOUT <= 0:
+                    break
+            timeout = POLL_TIMEOUT  # long polling 으로 버튼에 즉시 반응
     finally:
         browser.quit()
         storage.save_db(db)
+        storage.persist()
 
 
 if __name__ == "__main__":
