@@ -3,13 +3,17 @@
 import json
 import os
 import re
+import subprocess
 import tempfile
+import time
 import time
 import uuid
 from urllib.parse import parse_qs, unquote, urlparse
 
 DB_FILE = os.environ.get("DB_FILE", "users.json")
 SCHEMA_VERSION = 2
+# 오래 켜두고 도는 동안에도 등록 내용이 남도록, 바뀔 때마다 저장소에 커밋한다.
+GIT_PERSIST = os.environ.get("GIT_PERSIST") == "1"
 
 
 def default_db():
@@ -123,3 +127,36 @@ def save_db(db, path=None):
         tmp.write("\n")
         temp_path = tmp.name
     os.replace(temp_path, path)
+
+
+def _run_git(args, timeout=60):
+    result = subprocess.run(["git", *args], capture_output=True, text=True,
+                            timeout=timeout)
+    return result.returncode, (result.stdout + result.stderr).strip()
+
+
+def persist(path=None, message="Update user database"):
+    """바뀐 users.json 을 저장소에 커밋·푸시한다.
+
+    실행이 몇 시간씩 이어지므로 종료 시점에만 저장하면 그 사이 등록한 내용이
+    날아갈 수 있다. 그래서 바뀔 때마다 바로 남긴다. 실패해도 봇은 계속 돈다.
+    """
+    if not GIT_PERSIST:
+        return False
+    path = path or DB_FILE
+    try:
+        _run_git(["add", path])
+        if _run_git(["diff", "--cached", "--quiet"])[0] == 0:
+            return False  # 바뀐 내용 없음
+        _run_git(["commit", "-m", message])
+        for attempt in range(3):
+            _run_git(["pull", "--rebase", "--quiet"])
+            code, output = _run_git(["push", "--quiet"])
+            if code == 0:
+                print("💾 등록 내용을 저장했습니다.")
+                return True
+            print(f"⚠️ 저장 실패({attempt + 1}/3): {output[:150]}")
+            time.sleep(2 ** attempt)
+    except (subprocess.SubprocessError, OSError) as exc:
+        print(f"⚠️ 저장 중 오류: {exc}")
+    return False

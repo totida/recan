@@ -3,15 +3,17 @@ name: 숙소 예약 알림봇
 on:
   workflow_dispatch:
   schedule:
-    # 5분마다 실행. 대화가 없으면 곧바로 끝나고(사용 시간 절약),
-    # 대화 중이면 최대 MAX_RUN_SEC 동안 머물며 버튼(달력)에 즉시 반응한다.
-    # 실제 사이트 검색은 항목별로 1시간(SEARCH_INTERVAL_MIN)에 한 번만 수행한다.
+    # 이 예약은 '봇을 다시 띄우는 방아쇠'다.
+    # 한 번 뜨면 MAX_RUN_SEC(약 5시간 30분) 동안 계속 켜져 있으면서
+    # SEARCH_INTERVAL_MIN 마다 검색하고, 버튼 입력에는 1초 안에 반응한다.
+    # GitHub 가 예약 실행을 미루더라도 실행 하나가 길어서 공백이 거의 없다.
     - cron: '*/5 * * * *'
 
 permissions:
   contents: write
 
-# 실행이 겹쳐 users.json 이 꼬이는 것을 방지
+# 봇이 둘 이상 동시에 돌면 텔레그램 메시지를 서로 가져간다.
+# 앞선 실행이 끝날 때까지 기다렸다가 이어받는다.
 concurrency:
   group: accommodation-bot
   cancel-in-progress: false
@@ -19,11 +21,13 @@ concurrency:
 jobs:
   run-bot:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 350
 
     steps:
       - name: 저장소 체크아웃
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # 봇이 실행 중에 커밋·푸시하므로 전체 이력이 필요
 
       - name: 파이썬 설치
         uses: actions/setup-python@v5
@@ -39,20 +43,25 @@ jobs:
       - name: 자체 테스트
         run: python -m unittest discover -s tests -q
 
-      - name: 봇 실행
-        env:
-          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
-          SEARCH_INTERVAL_MIN: '60'   # 항목별 검색 주기(분)
-          NOTIFY_INTERVAL_MIN: '60'   # 같은 결과 재알림 최소 간격(분)
-          POLL_TIMEOUT_SEC: '20'      # 대화 중 long polling 대기(초)
-          IDLE_EXIT_SEC: '150'        # 이 시간 동안 조용하면 실행 종료(초)
-          MAX_RUN_SEC: '900'          # 한 번의 실행 상한(초, 최대 15분 온라인)
-        run: python bot.py
-
-      - name: 변경된 users.json 저장
+      - name: 저장 설정
         run: |
           git config --global user.name 'github-actions[bot]'
           git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+
+      - name: 봇 실행
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          SEARCH_INTERVAL_MIN: '10'   # 항목별 검색 주기(분)
+          NOTIFY_INTERVAL_MIN: '60'   # 같은 결과 재알림 최소 간격(분)
+          POLL_TIMEOUT_SEC: '20'      # long polling 대기(초)
+          IDLE_EXIT_SEC: '0'          # 0 = 조용해도 종료하지 않음(상시 대기)
+          MAX_RUN_SEC: '19800'        # 5시간 30분 뒤 종료 → 다음 실행이 이어받음
+          GIT_PERSIST: '1'            # 등록 내용이 바뀔 때마다 즉시 저장
+        run: python bot.py
+
+      - name: 남은 변경 사항 저장
+        if: always()
+        run: |
           git add users.json
           if git diff --cached --quiet; then
             echo "저장할 변경 사항 없음"

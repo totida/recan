@@ -125,9 +125,22 @@ GitHub 저장소 → Settings → Secrets → Actions 에 `TELEGRAM_TOKEN` 을 �
 | `SEARCH_INTERVAL_MIN` | 60 | 검색 주기(분) |
 | `NOTIFY_INTERVAL_MIN` | 60 | 같은 결과 재알림 최소 간격(분) |
 | `MAX_WATCHES` | 10 | 채팅방당 최대 알림 수 |
-| `POLL_TIMEOUT_SEC` | 20 | 대화 중 long polling 대기(초) |
-| `IDLE_EXIT_SEC` | 60 | 이만큼 조용하면 실행 종료(초) |
+| `POLL_TIMEOUT_SEC` | 20 | long polling 대기(초) |
+| `IDLE_EXIT_SEC` | 60 | 이만큼 조용하면 실행 종료(초). **0 이면 상시 대기** |
 | `MAX_RUN_SEC` | 300 | 한 번의 실행 상한(초) |
+| `GIT_PERSIST` | (없음) | `1` 이면 등록 내용이 바뀔 때마다 저장소에 커밋 |
+
+### 두 가지 실행 방식
+
+| | 짧게 깨우기 (`IDLE_EXIT_SEC=60`) | 상시 대기 (`IDLE_EXIT_SEC=0`) |
+| --- | --- | --- |
+| 동작 | 입력이 없으면 즉시 종료 | `MAX_RUN_SEC` 까지 계속 켜둠 |
+| 탐지 주기 | 실제 2~3시간 (GitHub 가 예약 실행을 미룸) | 설정한 검색 주기 그대로 (10분 등) |
+| 버튼 반응 | 다음 실행까지 대기 | 1초 이내 |
+| Actions 사용 시간 | 월 400~500분 | 사실상 24시간 → **공개 저장소에서만 현실적** |
+
+상시 대기는 실행 하나가 5시간 30분 동안 이어지고, 끝나면 대기 중이던 다음
+실행이 이어받습니다. 동시에 둘이 돌지 않도록 `concurrency` 로 묶여 있습니다.
 
 > 버튼 반응을 항상 즉시로 만들려면 `IDLE_EXIT_SEC`/`MAX_RUN_SEC`를 키우면 되지만,
 > 그만큼 Actions 사용 시간이 늘어납니다(비공개 저장소는 분 단위 과금).
