@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "last_update_id": 378875118,
+  "last_update_id": 378875119,
   "chats": {
     "652517175": {
       "state": null,
@@ -15,8 +15,8 @@
           "guests": 2,
           "url": null,
           "created_at": 1789334652,
-          "last_searched": 1789338318,
-          "last_notified": 1789334652,
+          "last_searched": 1789338438,
+          "last_notified": 1789338438,
           "last_signature": "",
           "was_available": false,
           "force": false
@@ -31,8 +31,8 @@
           "guests": 2,
           "url": null,
           "created_at": 1789335038,
-          "last_searched": 1789338102,
-          "last_notified": 1789335039,
+          "last_searched": 1789338438,
+          "last_notified": 1789338438,
           "last_signature": "",
           "was_available": false,
           "force": false
@@ -47,8 +47,8 @@
           "guests": 2,
           "url": null,
           "created_at": 1789335156,
-          "last_searched": 1789338211,
-          "last_notified": 1789335157,
+          "last_searched": 1789338438,
+          "last_notified": 1789338438,
           "last_signature": "",
           "was_available": false,
           "force": false
