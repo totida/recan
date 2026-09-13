@@ -45,6 +45,8 @@ STATUS_LABEL = {
     search.STATUS_UNKNOWN: "확인 불가",
     search.STATUS_ERROR: "검색 실패",
 }
+# 숙소는 찾았는데 가격·마감 표시가 없을 때 왜 그런지 알려준다.
+UNKNOWN_NOTE = "숙소는 찾았지만 가격 표시가 없어 판정 보류 · 링크에서 확인해 주세요"
 
 SKIP_WORDS = ("건너뛰기", "건너뜀", "스킵", "skip", "모름", "몰라", "패스")
 NONE_WORDS = ("없음", "없어요", "없어", "직접", "직접입력", "기타")
@@ -108,7 +110,10 @@ def format_report(watch, results, header=""):
         label = STATUS_LABEL.get(result.status, result.status)
         if result.note == search.NOT_LISTED_NOTE:
             icon, label = "🚫", "미취급"
-        suffix = f" — {result.note}" if result.note else ""
+        note = result.note
+        if result.status == search.STATUS_UNKNOWN and not note:
+            note = UNKNOWN_NOTE
+        suffix = f" — {note}" if note else ""
         lines.append(f"{icon} {result.name} · {label}{suffix}")
         for offer in result.offers:
             price = f" {offer.price}" if offer.price else ""
