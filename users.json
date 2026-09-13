@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "last_update_id": 378875116,
+  "last_update_id": 378875117,
   "chats": {
     "652517175": {
       "state": {
@@ -8,11 +8,11 @@
         "keyword": "쏠비치 남해",
         "guests": 2,
         "url": null,
-        "checkin": null,
+        "checkin": "2026-10-10",
         "checkout": null,
         "address": "경상남도 남해군 미조면 쏠비치길 21",
         "address_source": "naver",
-        "step": "await_checkin"
+        "step": "await_checkout"
       },
       "watches": [
         {
