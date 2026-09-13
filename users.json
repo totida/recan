@@ -1,9 +1,46 @@
 {
   "version": 2,
-  "last_update_id": 378875113,
+  "last_update_id": 378875114,
   "chats": {
     "652517175": {
-      "state": null,
+      "state": {
+        "query": "쏠비치 남해",
+        "keyword": "쏠비치 남해",
+        "guests": 2,
+        "url": null,
+        "checkin": null,
+        "checkout": null,
+        "address": "",
+        "address_source": "",
+        "step": "await_place_choice",
+        "candidates": [
+          {
+            "name": "쏠비치 남해콘도,리조트",
+            "address": "경상남도 남해군 미조면 쏠비치길 21",
+            "url": ""
+          },
+          {
+            "name": "쏠비치남해 비스트로게미이자카야",
+            "address": "경상남도 남해군 미조면 쏠비치길 21 비스트로게미",
+            "url": ""
+          },
+          {
+            "name": "쏠비치남해 소울다이닝 바래퓨전음식",
+            "address": "경상남도 남해군 미조면 쏠비치길 21 쏠비치 남해 호텔 3F",
+            "url": ""
+          },
+          {
+            "name": "쏠비치 남해 인피니티풀워터파크",
+            "address": "경상남도 남해군 미조면 쏠비치길 21",
+            "url": ""
+          },
+          {
+            "name": "쏠비치남해 풀사이드스낵&바바(BAR)",
+            "address": "경상남도 남해군 미조면 미송로303번길 115",
+            "url": ""
+          }
+        ]
+      },
       "watches": [
         {
           "id": "e82a0d97",
