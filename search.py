@@ -115,7 +115,7 @@ SIMILARITY_MIN_BLOCK = 3
 ROMAN_THRESHOLD = 0.68
 ROMAN_MIN_BLOCK = 6
 ROMAN_MIN_LENGTH = 8
-ROMAN_TITLE_LINES = 2
+ROMAN_TITLE_LINES = 1
 
 _CHO = ("g", "kk", "n", "d", "tt", "r", "m", "b", "pp", "s", "ss", "", "j", "jj",
         "ch", "k", "t", "p", "h")
@@ -143,14 +143,20 @@ def _latin_only(text):
     return re.sub(r"[^a-z0-9]+", "", (text or "").lower())
 
 
+# '15.4 miles from Lahan Select Gyeongju' 처럼 다른 숙소 카드에 적히는 거리 안내.
+DISTANCE_RE = re.compile(
+    r"[\d.]+\s*(?:miles?|km|m|킬로|미터)\s*(?:from|away from)?\s*[^\n]*", re.I)
+
+
 def _card_head(text, lines=ROMAN_TITLE_LINES):
     """카드 맨 앞(숙소 이름이 있는 곳)만 잘라낸다.
 
-    부킹닷컴은 다른 숙소 카드에도 '13.1 miles from Lahan Select Gyeongju' 처럼
-    기준 숙소 이름을 적어두기 때문에, 본문 전체로 대조하면 엉뚱한 숙소가 걸린다.
+    부킹닷컴은 다른 숙소 카드에도 '15.4 miles from Lahan Select Gyeongju' 처럼
+    기준 숙소 이름을 적어둔다. 그 줄까지 보면 엉뚱한 숙소를 그 숙소로 착각한다.
     """
     head = [line.strip() for line in (text or "").splitlines() if line.strip()]
-    return " ".join(head[:lines])[:80]
+    joined = " ".join(head[:lines])
+    return DISTANCE_RE.sub(" ", joined)[:80]
 
 
 def roman_matches(query, text):
@@ -426,6 +432,27 @@ def naver_room_url(href):
     return href
 
 
+# 네이버는 숙소 이름 뒤에 업종을 붙여 적는다. ('한우산별천지기타숙박업')
+PLACE_NAME_SUFFIXES = ("기타숙박업", "숙박업", "부속시설", "전기차충전소", "주차장",
+                       "관리실", "사이트", "정보")
+# 숙소가 아닌 부속 장소는 후보에서 뺀다.
+NON_LODGING_WORDS = ("주차장", "충전소", "부속시설", "관리실", "마켓", "뷔페", "식당",
+                     "카페", "편의점", "매점", "입구", "매표소")
+
+
+def clean_place_name(name):
+    """'한우산별천지기타숙박업' → '한우산별천지'"""
+    name = (name or "").strip()
+    changed = True
+    while changed:
+        changed = False
+        for suffix in PLACE_NAME_SUFFIXES:
+            if name.endswith(suffix) and len(name) - len(suffix) >= 2:
+                name = name[: -len(suffix)].strip()
+                changed = True
+    return name
+
+
 def parse_place_cards(query, cards, limit=5):
     """검색 카드에서 (숙소 이름, 주소, 링크) 후보를 뽑는다."""
     candidates, seen = [], set()
@@ -436,8 +463,11 @@ def parse_place_cards(query, cards, limit=5):
         address = address_line(text)
         if not address:
             continue
-        name = card_title(text, fallback=query, query=query)
-        if normalize(name) == normalize(address):
+        raw_name = card_title(text, fallback=query, query=query)
+        if any(word in raw_name for word in NON_LODGING_WORDS):
+            continue  # 주차장·부속시설 등은 숙소가 아니다 (업종 제거 전에 걸러낸다)
+        name = clean_place_name(raw_name)
+        if not name or normalize(name) == normalize(address):
             continue
         key = (normalize(name), normalize(address))
         if key in seen:
