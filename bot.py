@@ -705,6 +705,8 @@ def run_due_searches(db, now=None, today=None, browser=None):
 def main():
     """조용하면 곧바로 끝내고, 대화 중이면 잠시 더 머물며 버튼에 바로 반응한다."""
     db = storage.load_db()
+    watches = sum(len(chat.get("watches", [])) for chat in db["chats"].values())
+    print(f"📂 감시 중인 숙소 {watches}건을 불러왔습니다.")
     browser = search.Browser()  # 크롬은 실제로 필요할 때만 뜬다
     started = time.time()
     last_activity = None

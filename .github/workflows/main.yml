@@ -29,6 +29,16 @@ jobs:
         with:
           fetch-depth: 0   # 봇이 실행 중에 커밋·푸시하므로 전체 이력이 필요
 
+      # 예약 실행으로 뜬 작업은 '대기열에 들어간 시점'의 커밋을 받는다.
+      # 앞선 실행이 5시간 넘게 돌면 그만큼 옛날 상태로 시작하게 되므로,
+      # 브랜치의 최신 상태로 맞춘 뒤 시작한다. (덤으로 detached HEAD 도 해소)
+      - name: 최신 상태로 맞추기
+        run: |
+          BRANCH="${GITHUB_REF_NAME:-main}"
+          git fetch origin "$BRANCH"
+          git checkout -B "$BRANCH" "origin/$BRANCH"
+          git log -1 --format='시작 지점: %h  %ci'
+
       - name: 파이썬 설치
         uses: actions/setup-python@v5
         with:
@@ -69,7 +79,8 @@ jobs:
           fi
           git commit -m "Update user database"
           for attempt in 1 2 3 4; do
-            git pull --rebase origin "${GITHUB_REF_NAME}" && git push && exit 0
+            git pull --rebase origin "${GITHUB_REF_NAME}" \
+              && git push origin "HEAD:${GITHUB_REF_NAME}" && exit 0
             echo "push 실패, ${attempt}회차 재시도"
             sleep $((2 ** attempt))
           done
