@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "last_update_id": 378875127,
+  "last_update_id": 378875128,
   "chats": {
     "652517175": {
       "state": null,
@@ -19,22 +19,6 @@
           "last_notified": 1789338438,
           "last_signature": "",
           "was_available": false,
-          "force": false
-        },
-        {
-          "id": "b3a05aa5",
-          "query": "쏠비치 남해콘도,리조트",
-          "keyword": "쏠비치 남해",
-          "address": "경상남도 남해군 미조면 쏠비치길 21",
-          "checkin": "2026-10-10",
-          "checkout": "2026-10-11",
-          "guests": 2,
-          "url": null,
-          "created_at": 1789335156,
-          "last_searched": 1789378918,
-          "last_notified": 1789378918,
-          "last_signature": "쏠비치 남해 호텔|554,000원",
-          "was_available": true,
           "force": false
         }
       ]
