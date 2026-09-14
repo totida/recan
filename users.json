@@ -1,9 +1,27 @@
 {
   "version": 2,
-  "last_update_id": 378875139,
+  "last_update_id": 378875140,
   "chats": {
     "652517175": {
-      "state": null,
+      "state": {
+        "query": "한우산별천지",
+        "keyword": "한우산별천지",
+        "guests": 2,
+        "guests_set": false,
+        "url": null,
+        "checkin": null,
+        "checkout": null,
+        "address": "",
+        "address_source": "",
+        "step": "await_place_choice",
+        "candidates": [
+          {
+            "name": "한우산별천지",
+            "address": "경상남도 의령군 궁류면 한우산길 688 한우산 별천지",
+            "url": ""
+          }
+        ]
+      },
       "watches": []
     },
     "6861147384": {
