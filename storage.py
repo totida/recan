@@ -6,6 +6,8 @@ import re
 import subprocess
 import tempfile
 import time
+
+import requests
 import time
 import uuid
 from urllib.parse import parse_qs, unquote, urlparse
@@ -18,6 +20,56 @@ GIT_PERSIST = os.environ.get("GIT_PERSIST") == "1"
 # 시작한다. 그 상태에서는 인자 없는 pull/push 가 통째로 실패하므로,
 # 언제나 브랜치를 명시해서 주고받는다.
 GIT_BRANCH = os.environ.get("GITHUB_REF_NAME") or "main"
+
+# 등록 내용을 저장소 대신 비공개 Gist 에 둘 수 있다.
+# 저장소가 공개라도 쓰는 사람의 채팅 ID·감시 목록이 공개되지 않는다.
+GIST_ID = os.environ.get("GIST_ID", "").strip()
+GIST_TOKEN = os.environ.get("GIST_TOKEN", "").strip()
+GIST_FILENAME = os.environ.get("GIST_FILENAME", "users.json").strip() or "users.json"
+GIST_API = "https://api.github.com/gists/"
+
+
+class StorageError(RuntimeError):
+    """저장소를 읽지 못했을 때. 빈 상태로 시작해 덮어쓰는 사고를 막는다."""
+
+
+def gist_enabled():
+    return bool(GIST_ID and GIST_TOKEN)
+
+
+def _gist_headers():
+    return {
+        "Authorization": f"Bearer {GIST_TOKEN}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+
+
+def gist_read():
+    """Gist 에 저장된 내용을 문자열로. 파일이 없으면 빈 문자열."""
+    response = requests.get(GIST_API + GIST_ID, headers=_gist_headers(), timeout=30)
+    response.raise_for_status()
+    files = response.json().get("files") or {}
+    entry = files.get(GIST_FILENAME) or {}
+    if entry.get("truncated") and entry.get("raw_url"):
+        raw = requests.get(entry["raw_url"], headers=_gist_headers(), timeout=30)
+        raw.raise_for_status()
+        return raw.text
+    return entry.get("content", "")
+
+
+def gist_write(content):
+    response = requests.patch(
+        GIST_API + GIST_ID,
+        headers=_gist_headers(),
+        json={"files": {GIST_FILENAME: {"content": content}}},
+        timeout=30,
+    )
+    response.raise_for_status()
+    return True
+
+
+_last_saved = {}
 
 
 def default_db():
@@ -109,19 +161,55 @@ def migrate(raw):
     return db
 
 
-def load_db(path=None):
-    path = path or DB_FILE
+def _load_file(path):
     if not os.path.exists(path):
-        return default_db()
+        return None
     try:
         with open(path, "r", encoding="utf-8") as f:
             return migrate(json.load(f))
     except (json.JSONDecodeError, OSError) as exc:
-        print(f"⚠️ DB 로드 실패({exc}). 새 DB로 시작합니다.")
+        print(f"⚠️ 파일에서 불러오지 못했습니다({exc}).")
+        return None
+
+
+def load_db(path=None):
+    path = path or DB_FILE
+    if gist_enabled():
+        try:
+            raw = gist_read()
+        except (requests.RequestException, ValueError) as exc:
+            # 여기서 빈 상태로 시작하면 다음 저장 때 전부 지워진다. 차라리 멈춘다.
+            raise StorageError(f"Gist 를 읽지 못했습니다: {exc}") from exc
+        if raw.strip():
+            print("📥 Gist 에서 등록 내용을 불러왔습니다.")
+            return migrate(json.loads(raw))
+        seeded = _load_file(path)
+        if seeded:
+            print("🌱 Gist 가 비어 있어 저장소의 users.json 으로 시작합니다.")
+            return seeded
+        print("🆕 새 저장소로 시작합니다.")
         return default_db()
+
+    loaded = _load_file(path)
+    if loaded is None:
+        return default_db()
+    return loaded
 
 
 def save_db(db, path=None):
+    """Gist 를 쓰는 경우 거기에, 아니면 파일에 저장한다."""
+    if gist_enabled():
+        content = json.dumps(db, ensure_ascii=False, indent=2) + "\n"
+        if content == _last_saved.get("content"):
+            return True
+        try:
+            gist_write(content)
+            _last_saved["content"] = content
+            return True
+        except (requests.RequestException, ValueError) as exc:
+            print(f"🚨 Gist 저장 실패: {exc}")
+            return False
+
     path = path or DB_FILE
     directory = os.path.dirname(os.path.abspath(path))
     with tempfile.NamedTemporaryFile(
@@ -145,7 +233,7 @@ def persist(path=None, message="Update user database"):
     실행이 몇 시간씩 이어지므로 종료 시점에만 저장하면 그 사이 등록한 내용이
     날아갈 수 있다. 그래서 바뀔 때마다 바로 남긴다. 실패해도 봇은 계속 돈다.
     """
-    if not GIT_PERSIST:
+    if gist_enabled() or not GIT_PERSIST:
         return False
     path = path or DB_FILE
     try:
