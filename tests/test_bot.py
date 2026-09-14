@@ -104,10 +104,12 @@ class ConversationTest(unittest.TestCase):
     def watches(self):
         return storage.get_chat(self.db, CHAT)["watches"]
 
-    def register(self, line, address="건너뛰기"):
+    def register(self, line, address="건너뛰기", guests="2"):
         """네이버 후보 없이(수동 주소) 등록하는 지름길."""
         self.say(line)
         self.say(address)
+        if self.state() and self.state()["step"] == "await_guests":
+            self.say(guests)
         return self.say("예")
 
     # --- 네이버 후보 + 달력 -------------------------------------------------
@@ -132,11 +134,16 @@ class ConversationTest(unittest.TestCase):
         self.assertNotIn("cal:out:2026-05-02", buttons(replies))  # 체크인 당일은 불가
 
         replies = self.tap("cal:out:2026-05-04")
+        self.assertIn("몇 분이 묵으시나요", texts(replies))
+        self.assertIn("guests:pick:4", buttons(replies))
+
+        replies = self.tap("guests:pick:4")
         self.assertIn("등록 완료", texts(replies))
         self.assertIsNone(self.state())
 
         watch = self.watches()[0]
         self.assertEqual(watch["query"], "비토애 산청")
+        self.assertEqual(watch["guests"], 4)
         self.assertEqual(watch["address"], CANDIDATES[0]["address"])
         self.assertEqual(watch["url"], CANDIDATES[0]["url"])
         self.assertEqual((watch["checkin"], watch["checkout"]), ("2026-05-02", "2026-05-04"))
@@ -159,13 +166,16 @@ class ConversationTest(unittest.TestCase):
         replies = self.say("비토애 산청 5/2~5/3", lookup=lambda q: CANDIDATES)
         self.assertIn("어느 숙소인가요", texts(replies))
         replies = self.tap("place:pick:0")
+        self.assertIn("몇 분이 묵으시나요", texts(replies))
+        replies = self.tap("guests:pick:3")
         self.assertIn("등록 완료", texts(replies))
         self.assertEqual(self.watches()[0]["checkin"], "2026-05-02")
+        self.assertEqual(self.watches()[0]["guests"], 3)
 
     def test_typed_dates_instead_of_calendar(self):
         self.say("비토애 산청", lookup=lambda q: CANDIDATES)
         self.tap("place:pick:0")
-        replies = self.say("5/2~5/4 4명")
+        replies = self.say("5/2~5/4 4명")   # 인원까지 적으면 인원 질문을 건너뛴다
         self.assertIn("등록 완료", texts(replies))
         watch = self.watches()[0]
         self.assertEqual(watch["checkout"], "2026-05-04")
@@ -185,7 +195,8 @@ class ConversationTest(unittest.TestCase):
         self.assertIn("주소를 알려주세요", texts(replies))
         self.say("경남 산청군 시천면")
         self.tap("cal:in:2026-05-02")
-        replies = self.tap("cal:out:2026-05-03")
+        self.tap("cal:out:2026-05-03")
+        replies = self.tap("guests:pick:2")
         self.assertIn("확인해 주세요", texts(replies))   # 직접 입력은 한 번 더 확인
         replies = self.tap("confirm:yes")
         self.assertIn("등록 완료", texts(replies))
@@ -193,7 +204,8 @@ class ConversationTest(unittest.TestCase):
 
     def test_place_skip_registers_without_address(self):
         self.say("비토애 산청 5/2~5/3", lookup=lambda q: CANDIDATES)
-        replies = self.tap("place:skip")
+        self.tap("place:skip")
+        replies = self.tap("guests:pick:2")
         self.assertIn("확인해 주세요", texts(replies))
         self.tap("confirm:yes")
         self.assertEqual(self.watches()[0]["address"], "")
@@ -230,6 +242,7 @@ class ConversationTest(unittest.TestCase):
     def test_reject_confirmation_restarts(self):
         self.say("비토애 산청 5/2~5/3")
         self.say("경남 산청군")
+        self.say("2")
         replies = self.say("아니오")
         self.assertIn("다시 알려주세요", texts(replies))
         self.assertEqual(self.watches(), [])
@@ -237,6 +250,7 @@ class ConversationTest(unittest.TestCase):
     def test_unclear_confirmation_keeps_asking(self):
         self.say("비토애 산청 5/2~5/3")
         self.say("경남 산청군")
+        self.say("2")
         replies = self.say("음...")
         self.assertIn("'예' 또는 '아니오'", texts(replies))
         self.assertEqual(self.state()["step"], "await_confirm")
@@ -273,18 +287,48 @@ class ConversationTest(unittest.TestCase):
     def test_help_command(self):
         self.assertIn("숙소 빈방 알림봇", texts(self.say("/start")))
 
+    def test_guests_question_and_change(self):
+        """인원을 안 적으면 물어보고, 등록 후에도 바꿀 수 있다."""
+        self.say("소노벨 변산 6/1~6/2")
+        self.say("전북 부안군 변산면")
+        replies = self.say("음...")
+        self.assertIn("숫자로 알려주세요", texts(replies))
+        self.say("6")
+        self.say("예")
+        self.assertEqual(self.watches()[0]["guests"], 6)
+
+        self.watches()[0]["force"] = False
+        replies = self.say("인원 1 4")
+        self.assertIn("4명으로 바꿨어요", texts(replies))
+        self.assertEqual(self.watches()[0]["guests"], 4)
+        self.assertTrue(self.watches()[0]["force"])   # 바뀐 인원으로 바로 재검색
+
+    def test_guests_out_of_range(self):
+        self.register("소노벨 변산 6/1~6/2")
+        self.assertIn("사이로 알려주세요", texts(self.say("인원 1 99")))
+        self.assertEqual(self.watches()[0]["guests"], 2)
+
+    def test_guests_change_needs_a_number(self):
+        self.register("소노벨 변산 6/1~6/2")
+        self.register("비토애 산청 6/1~6/2")
+        self.assertIn("'인원 2 4' 처럼", texts(self.say("인원")))
+
     def test_naver_link_registers_directly(self):
         url = (
             "https://m.place.naver.com/accommodation/1259756405/room?entry=pll"
             "&bk_query=%EB%B9%84%ED%86%A0%EC%95%A0%20%EC%82%B0%EC%B2%AD"
             "&guest=4&checkin=20260502&checkout=20260503"
         )
-        replies = self.say(url)
+        replies = self.say(url)   # 링크에 guest=4 가 들어 있어 인원을 묻지 않는다
         self.assertIn("등록 완료", texts(replies))
         watch = self.watches()[0]
         self.assertEqual(watch["query"], "비토애 산청")
         self.assertEqual(watch["guests"], 4)
         self.assertIn("accommodation/1259756405/room", watch["url"])
+
+    def test_link_without_guests_asks(self):
+        self.say("https://m.place.naver.com/accommodation/1/room?checkin=20260502&checkout=20260503")
+        self.assertEqual(self.state()["step"], "await_guests")
 
     def test_link_without_dates_opens_calendar(self):
         replies = self.say("https://www.goodchoice.kr/product/123")
@@ -306,7 +350,7 @@ class ConversationTest(unittest.TestCase):
 class SearchRunTest(unittest.TestCase):
     def setUp(self):
         self.db = storage.default_db()
-        for message in ("비토애 산청 5/2~5/3", "경남 산청군 시천면", "예"):
+        for message in ("비토애 산청 5/2~5/3", "경남 산청군 시천면", "2", "예"):
             bot.handle_text(self.db, CHAT, message, today=TODAY)
         self.watch = storage.get_chat(self.db, CHAT)["watches"][0]
 
@@ -442,6 +486,12 @@ class SearchRunTest(unittest.TestCase):
             self.run_search(FakeBrowser(page_text=page))
         self.assertIn("네이버 예약(등록 링크)", fake.text())
         self.assertIn("빈 객실 있음", fake.text())
+
+
+class ParticleTest(unittest.TestCase):
+    def test_object_particle(self):
+        self.assertEqual(bot._object_particle("부킹닷컴"), "을")   # 받침 있음
+        self.assertEqual(bot._object_particle("여기어때"), "를")   # 받침 없음
 
 
 class LogMaskTest(unittest.TestCase):

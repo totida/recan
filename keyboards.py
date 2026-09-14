@@ -94,6 +94,28 @@ def place_message(query, candidates):
     return "\n".join(lines)
 
 
+GUEST_CHOICES = (1, 2, 3, 4, 5, 6, 7, 8)
+
+
+def guests_keyboard():
+    """인원 선택 버튼."""
+    rows = []
+    for start in range(0, len(GUEST_CHOICES), 4):
+        rows.append([_button(f"{n}명", f"guests:pick:{n}")
+                     for n in GUEST_CHOICES[start:start + 4]])
+    rows.append([_button("✍️ 직접 입력", "guests:type"), _button("✖️ 취소", "guests:cancel")])
+    return rows
+
+
+def guests_message(query, checkin, checkout, nights):
+    return (
+        f"🏨 {query}\n"
+        f"📅 {checkin} → {checkout} ({nights}박)\n\n"
+        "👤 몇 분이 묵으시나요?\n"
+        "인원에 맞는 객실만 찾아드릴게요."
+    )
+
+
 def confirm_keyboard():
     return [[_button("✅ 예, 등록할게요", "confirm:yes"),
              _button("↩️ 아니오", "confirm:no")]]
