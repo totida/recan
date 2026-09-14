@@ -1,25 +1,18 @@
 {
   "version": 2,
-  "last_update_id": 378875130,
+  "last_update_id": 378875131,
   "chats": {
     "652517175": {
       "state": {
-        "query": "경주루나벨풀빌라",
+        "query": "루나벨 풀빌라펜션 C동펜션",
         "keyword": "경주루나벨풀빌라",
         "guests": 2,
         "url": null,
         "checkin": null,
         "checkout": null,
-        "address": "",
-        "address_source": "",
-        "step": "await_place_choice",
-        "candidates": [
-          {
-            "name": "루나벨 풀빌라펜션 C동펜션",
-            "address": "경상북도 경주시 양남면 후동길 11-20 경주루나벨풀빌라펜션C동",
-            "url": ""
-          }
-        ]
+        "address": "경상북도 경주시 양남면 후동길 11-20 경주루나벨풀빌라펜션C동",
+        "address_source": "naver",
+        "step": "await_checkin"
       },
       "watches": [
         {
