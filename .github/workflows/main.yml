@@ -67,6 +67,11 @@ jobs:
           IDLE_EXIT_SEC: '0'          # 0 = 조용해도 종료하지 않음(상시 대기)
           MAX_RUN_SEC: '19800'        # 5시간 30분 뒤 종료 → 다음 실행이 이어받음
           GIT_PERSIST: '1'            # 등록 내용이 바뀔 때마다 즉시 저장
+          # 아래 둘이 모두 있으면 등록 내용을 비공개 Gist 에 저장한다.
+          # (공개 저장소에 쓰는 사람의 채팅 ID·감시 목록이 남지 않도록)
+          # 시크릿이 없으면 지금까지처럼 저장소의 users.json 에 저장한다.
+          GIST_ID: ${{ secrets.GIST_ID }}
+          GIST_TOKEN: ${{ secrets.GIST_TOKEN }}
         run: python bot.py
 
       - name: 남은 변경 사항 저장
