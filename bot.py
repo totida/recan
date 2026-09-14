@@ -9,6 +9,7 @@
 """
 
 import os
+import re
 import time
 from datetime import date
 
@@ -22,6 +23,7 @@ SEARCH_INTERVAL = int(os.environ.get("SEARCH_INTERVAL_MIN", "60")) * 60
 NOTIFY_INTERVAL = int(os.environ.get("NOTIFY_INTERVAL_MIN", "60")) * 60
 MAX_WATCHES = int(os.environ.get("MAX_WATCHES", "10"))
 DEFAULT_GUESTS = 2
+MAX_GUESTS = 20
 
 # 실행 방식은 두 가지다.
 #   IDLE_EXIT_SEC > 0 : 조용하면 곧바로 종료 (비공개 저장소·사용 시간 절약)
@@ -59,7 +61,8 @@ HELP_TEXT = (
     "1️⃣ 원하는 숙소 이름을 보내주세요. (예: 비토애 산청)\n"
     "2️⃣ 네이버에서 찾은 숙소 후보를 주소와 함께 보여드릴게요. 버튼으로 고르시면 돼요.\n"
     "3️⃣ 오늘 날짜 기준 달력에서 체크인 · 체크아웃 날짜를 눌러주세요.\n"
-    "4️⃣ 여기어때 · 야놀자 · 네이버 예약 · 하나투어를 1시간마다 검색해서\n"
+    "    이어서 인원을 고르면 그 인원이 묵을 수 있는 객실만 찾아드려요.\n"
+    "4️⃣ 켜져 있는 예약 사이트를 주기적으로 검색해서\n"
     "    예약 가능한 방이 보이면 바로 알려드려요.\n"
     "    (고르신 주소로 같은 숙소가 맞는지 검색 결과를 다시 대조합니다)\n\n"
     "날짜는 버튼 대신 직접 입력해도 됩니다: 5/2~5/3, 내일 2박, 이번주말\n"
@@ -67,6 +70,7 @@ HELP_TEXT = (
     "📌 명령어\n"
     "  목록 — 등록된 알림 보기\n"
     "  삭제 2 — 2번 알림 삭제 (삭제 전체 = 모두 삭제)\n"
+    "  인원 2 4 — 2번 알림을 4명으로 변경\n"
     "  지금 — 기다리지 않고 바로 검색\n"
     "  취소 — 입력 중이던 등록 취소\n"
     "  도움말 — 이 안내 다시 보기"
@@ -150,6 +154,32 @@ def _extract_url(text):
     return next((word for word in text.split() if word.startswith("http")), None)
 
 
+def _guests_in_url(url):
+    """링크에 인원이 적혀 있으면 그 값을, 없으면 None (나중에 물어본다)."""
+    for key in ("guest", "personal", "adultCount", "group_adults", "adults"):
+        match = re.search(rf"[?&]{key}=(\d+)", url or "")
+        if match:
+            return int(match.group(1))
+    return None
+
+
+def _object_particle(word):
+    """받침에 맞는 조사(을/를)를 고른다."""
+    last = (word or "").strip()[-1:] or ""
+    if "가" <= last <= "힣":
+        return "을" if (ord(last) - 0xAC00) % 28 else "를"
+    return "을"
+
+
+def site_summary():
+    """지금 켜져 있는 사이트 이름과 검색 주기를 안내문에 쓰기 좋게."""
+    try:
+        names = " · ".join(site["name"] for site in search.load_sites())
+    except (OSError, ValueError):
+        names = "예약 사이트"
+    return names, max(1, SEARCH_INTERVAL // 60)
+
+
 def register_watch(chat, query, checkin, checkout, guests, url=None, address="",
                    keyword=""):
     """감시 항목 등록. (watch, 안내문) 반환."""
@@ -171,6 +201,7 @@ def register_watch(chat, query, checkin, checkout, guests, url=None, address="",
     watch["force"] = True  # 등록 직후 한 번 바로 검색
     chat["watches"].append(watch)
     nights = dateparse.nights_between(ci, co)
+    sites, minutes = site_summary()
     address_line = f"📍 {address}\n" if address else ""
     keyword_line = (f"🔎 검색어: {keyword}\n"
                     if keyword and search.normalize(keyword) != search.normalize(query)
@@ -187,7 +218,7 @@ def register_watch(chat, query, checkin, checkout, guests, url=None, address="",
         f"{keyword_line}"
         f"📅 {ci} → {co} ({nights}박 · {guests}명)\n\n"
         f"{verify_line}"
-        "여기어때 · 야놀자 · 네이버 예약 · 하나투어를 1시간마다 검색할게요.\n"
+        f"{sites}{_object_particle(sites)} {minutes}분마다 검색할게요.\n"
         "잠시 후 첫 검색 결과를 보내드립니다."
     )
 
@@ -200,7 +231,8 @@ def _start_registration(chat, query, guests, today, url=None,
                         checkin=None, checkout=None, lookup=None):
     """숙소 이름을 받은 뒤 네이버에서 후보를 찾아 되묻는다."""
     state = {
-        "query": query, "keyword": query, "guests": guests, "url": url,
+        "query": query, "keyword": query, "guests": guests or DEFAULT_GUESTS,
+        "guests_set": bool(guests), "url": url,
         "checkin": checkin, "checkout": checkout,
         "address": "", "address_source": "",
     }
@@ -266,6 +298,27 @@ def _ask_checkout(chat, state, today, edit=False):
     )]
 
 
+def _ask_guests(chat, state, edit=False):
+    """인원을 물어본다. 인원에 따라 검색되는 객실이 달라진다."""
+    state["step"] = "await_guests"
+    chat["state"] = state
+    nights = dateparse.nights_between(state["checkin"], state["checkout"])
+    return [reply(
+        keyboards.guests_message(state["query"], state["checkin"],
+                                 state["checkout"], nights),
+        keyboards.guests_keyboard(),
+        edit=edit,
+    )]
+
+
+def _set_guests(chat, state, guests, edit=False):
+    if not 1 <= guests <= MAX_GUESTS:
+        return [reply(f"1 ~ {MAX_GUESTS}명 사이로 알려주세요.")]
+    state["guests"] = guests
+    state["guests_set"] = True
+    return _finish(chat, state, edit=edit)
+
+
 def _ask_confirm(chat, state, edit=False):
     state["step"] = "await_confirm"
     chat["state"] = state
@@ -292,6 +345,8 @@ def _after_identity(chat, state, today, edit=False):
 
 def _finish(chat, state, edit=False):
     """네이버에서 고른 숙소는 바로 등록, 직접 입력한 주소는 한 번 더 확인."""
+    if not state.get("guests_set"):
+        return _ask_guests(chat, state, edit=edit)
     if state.get("address_source") in ("naver", "link"):
         chat["state"] = None
         _, message = register_watch(
@@ -322,6 +377,33 @@ def _pick_candidate(chat, state, index, today, edit=False):
         state["url"] = chosen["url"]
     state.pop("candidates", None)
     return _after_identity(chat, state, today, edit=edit)
+
+
+def _change_guests(chat, argument):
+    """등록된 알림의 인원을 바꾼다. '인원 2 4' = 2번 알림을 4명으로."""
+    watches = chat["watches"]
+    if not watches:
+        return "등록된 알림이 없어요."
+    numbers = [int(part) for part in argument.split() if part.isdigit()]
+    if len(numbers) == 1 and len(watches) == 1:
+        index, guests = 1, numbers[0]
+    elif len(numbers) >= 2:
+        index, guests = numbers[0], numbers[1]
+    else:
+        return ("'인원 2 4' 처럼 보내주세요. (2번 알림을 4명으로)\n"
+                "'목록' 으로 번호를 확인할 수 있어요.")
+    if not 1 <= index <= len(watches):
+        return f"1 ~ {len(watches)} 사이의 번호를 알려주세요."
+    if not 1 <= guests <= MAX_GUESTS:
+        return f"인원은 1 ~ {MAX_GUESTS}명 사이로 알려주세요."
+
+    watch = watches[index - 1]
+    watch["guests"] = guests
+    watch["force"] = True          # 바뀐 인원으로 바로 다시 검색
+    watch["last_signature"] = ""
+    return (f"👤 인원을 {guests}명으로 바꿨어요.\n"
+            f"🏨 {watch['query']} ({watch['checkin']} → {watch['checkout']})\n"
+            "바뀐 인원으로 지금 다시 검색할게요.")
 
 
 def _handle_delete(chat, argument):
@@ -375,6 +457,9 @@ def handle_text(db, chat_id, text, today=None, lookup=None):
             return [reply("입력을 취소했어요. 다른 숙소 이름을 보내주세요.")]
         return [reply("진행 중인 등록이 없어요.")]
 
+    if head_lower in ("인원", "사람", "guests"):
+        return [reply(_change_guests(chat, argument))]
+
     if head_lower in ("지금", "지금검색", "새로고침", "now", "refresh"):
         if not chat["watches"]:
             return [reply("등록된 알림이 없어요. 숙소 이름부터 보내주세요.")]
@@ -422,10 +507,22 @@ def handle_text(db, chat_id, text, today=None, lookup=None):
         checkin, checkout, _ = stay
         state["checkin"] = checkin.isoformat()
         state["checkout"] = checkout.isoformat()
-        state["guests"] = dateparse.parse_guests(text) or state.get("guests") or DEFAULT_GUESTS
+        typed_guests = dateparse.parse_guests(text)
+        if typed_guests:
+            state["guests"] = typed_guests
+            state["guests_set"] = True
         return _finish(chat, state)
 
-    # 4) 최종 확인
+    # 4) 인원 입력 (버튼 대신 숫자로 적어도 되게)
+    if step == "await_guests":
+        guests = dateparse.parse_guests(text)
+        if guests is None and command.isdigit():
+            guests = int(command)
+        if guests is None:
+            return [reply("인원을 숫자로 알려주세요. (예: 4 또는 4명)")]
+        return _set_guests(chat, state, guests)
+
+    # 5) 최종 확인
     if step == "await_confirm":
         answer = command.lower().rstrip("!.~ ")
         if answer in YES_WORDS:
@@ -435,7 +532,7 @@ def handle_text(db, chat_id, text, today=None, lookup=None):
             return [reply("알겠습니다. 숙소 이름부터 다시 알려주세요. (예: 비토애 산청)")]
         return [reply("'예' 또는 '아니오'로 답해주세요. 처음부터 다시 하려면 '취소'.")]
 
-    # 5) 새 요청 — 링크 또는 숙소 이름
+    # 6) 새 요청 — 링크 또는 숙소 이름
     url = _extract_url(text)
     if url:
         legacy = storage._watch_from_legacy_url(url)
@@ -444,7 +541,7 @@ def handle_text(db, chat_id, text, today=None, lookup=None):
         if not (checkin and checkout and checkout > checkin):
             checkin = checkout = None
         return _start_registration(
-            chat, legacy["query"], legacy["guests"], today,
+            chat, legacy["query"], _guests_in_url(url), today,
             url=search.naver_room_url(url), checkin=checkin, checkout=checkout,
         )
 
@@ -454,7 +551,7 @@ def handle_text(db, chat_id, text, today=None, lookup=None):
         return [reply(f"⚠️ {exc}\n다시 알려주세요. (예: 비토애 산청 5/2~5/3)")]
 
     name = parsed["name"].strip()
-    guests = parsed["guests"] or DEFAULT_GUESTS
+    guests = parsed["guests"]   # 안 적었으면 None → 나중에 버튼으로 물어본다
     if not name:
         return [reply("숙소 이름을 함께 알려주세요. (예: 비토애 산청 5/2~5/3)")]
     if len(name) > 60:
@@ -531,6 +628,15 @@ def handle_callback(db, chat_id, data, today=None):
             return _finish(chat, state, edit=True)
         if kind == "type":
             return [reply("날짜를 직접 보내주세요. (예: 5/2~5/3, 내일 2박, 이번주말)")]
+        if kind == "cancel":
+            chat["state"] = None
+            return [reply("등록을 취소했어요.", edit=True)]
+
+    if action == "guests":
+        if kind == "pick" and value.isdigit():
+            return _set_guests(chat, state, int(value), edit=True)
+        if kind == "type":
+            return [reply("인원을 숫자로 보내주세요. (예: 4)")]
         if kind == "cancel":
             chat["state"] = None
             return [reply("등록을 취소했어요.", edit=True)]
