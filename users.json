@@ -1,19 +1,9 @@
 {
   "version": 2,
-  "last_update_id": 378875133,
+  "last_update_id": 378875134,
   "chats": {
     "652517175": {
-      "state": {
-        "query": "루나벨 풀빌라펜션 C동펜션",
-        "keyword": "경주루나벨풀빌라",
-        "guests": 2,
-        "url": null,
-        "checkin": "2026-10-04",
-        "checkout": null,
-        "address": "경상북도 경주시 양남면 후동길 11-20 경주루나벨풀빌라펜션C동",
-        "address_source": "naver",
-        "step": "await_checkout"
-      },
+      "state": null,
       "watches": [
         {
           "id": "e82a0d97",
@@ -29,6 +19,22 @@
           "last_notified": 1789338438,
           "last_signature": "",
           "was_available": false,
+          "force": false
+        },
+        {
+          "id": "7b6adfe9",
+          "query": "루나벨 풀빌라펜션 C동펜션",
+          "keyword": "경주루나벨풀빌라",
+          "address": "경상북도 경주시 양남면 후동길 11-20 경주루나벨풀빌라펜션C동",
+          "checkin": "2026-10-04",
+          "checkout": "2026-10-05",
+          "guests": 2,
+          "url": null,
+          "created_at": 1789391488,
+          "last_searched": 1789391489,
+          "last_notified": 1789391489,
+          "last_signature": "경주 루나벨 풀빌라 C동|250,000원||경주 루나벨 풀빌라펜션 C동|250,000원",
+          "was_available": true,
           "force": false
         }
       ]
