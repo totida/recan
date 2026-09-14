@@ -14,6 +14,10 @@ DB_FILE = os.environ.get("DB_FILE", "users.json")
 SCHEMA_VERSION = 2
 # 오래 켜두고 도는 동안에도 등록 내용이 남도록, 바뀔 때마다 저장소에 커밋한다.
 GIT_PERSIST = os.environ.get("GIT_PERSIST") == "1"
+# 예약 실행으로 뜬 작업은 브랜치가 아니라 특정 커밋에 붙은 채(detached HEAD)
+# 시작한다. 그 상태에서는 인자 없는 pull/push 가 통째로 실패하므로,
+# 언제나 브랜치를 명시해서 주고받는다.
+GIT_BRANCH = os.environ.get("GITHUB_REF_NAME") or "main"
 
 
 def default_db():
@@ -150,13 +154,14 @@ def persist(path=None, message="Update user database"):
             return False  # 바뀐 내용 없음
         _run_git(["commit", "-m", message])
         for attempt in range(3):
-            _run_git(["pull", "--rebase", "--quiet"])
-            code, output = _run_git(["push", "--quiet"])
+            _run_git(["pull", "--rebase", "--quiet", "origin", GIT_BRANCH])
+            code, output = _run_git(["push", "--quiet", "origin",
+                                     f"HEAD:{GIT_BRANCH}"])
             if code == 0:
-                print("💾 등록 내용을 저장했습니다.")
                 return True
-            print(f"⚠️ 저장 실패({attempt + 1}/3): {output[:150]}")
+            print(f"⚠️ 저장 실패({attempt + 1}/3): {output[:200]}")
             time.sleep(2 ** attempt)
+        print("🚨 등록 내용을 저장하지 못했습니다. 다음 실행에서 되돌아갈 수 있습니다.")
     except (subprocess.SubprocessError, OSError) as exc:
         print(f"⚠️ 저장 중 오류: {exc}")
     return False
