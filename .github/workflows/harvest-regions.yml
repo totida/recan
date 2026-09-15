@@ -1,0 +1,21 @@
+name: 트리플 지역 주소록 수집
+
+# 한 번만 돌려서 결과를 triple_regions.json 에 넣어두면 됩니다.
+on:
+  workflow_dispatch:
+
+jobs:
+  harvest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: 지역 주소록 수집
+        run: python tools/harvest_triple_regions.py
