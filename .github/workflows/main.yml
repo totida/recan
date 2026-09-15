@@ -76,7 +76,13 @@ jobs:
 
       - name: 남은 변경 사항 저장
         if: always()
+        env:
+          GIST_ID: ${{ secrets.GIST_ID }}
         run: |
+          if [ -n "$GIST_ID" ]; then
+            echo "등록 내용은 Gist 에 저장되므로 저장소에 남길 것이 없습니다"
+            exit 0
+          fi
           git add users.json
           if git diff --cached --quiet; then
             echo "저장할 변경 사항 없음"

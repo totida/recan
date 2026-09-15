@@ -1,3 +1,6 @@
 __pycache__/
 *.pyc
 .venv/
+
+# 등록 내용은 비공개 Gist 에 저장한다 (저장소에 남기지 않는다)
+users.json
