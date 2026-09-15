@@ -715,6 +715,109 @@ def naver_detail_result(browser, watch, place_url, name="네이버 예약"):
     return SiteResult("naver_detail", name, status, url, offers, note)
 
 
+# --------------------------------------------------------------------------
+# 인터파크 트리플(등록된 링크가 있을 때)
+#
+# 트리플은 검색 화면이 자바스크립트로만 그려져서 숙소 이름으로는 찾아갈 수 없다.
+# (덕덕고·빙·구글·네이버·인터파크 검색에서도 트리플 숙소 주소가 나오지 않는다.)
+# 대신 숙소 상세 페이지는 그대로 읽히므로, 링크를 한 번 등록해 두면
+# 날짜·인원을 우리가 바꿔 끼워 계속 감시할 수 있다.
+# --------------------------------------------------------------------------
+
+TRIPLE_HOTEL_RE = re.compile(
+    r"https?://(?:www\.)?triple\.guide/hotels/[0-9a-fA-F]{8}-[0-9a-fA-F-]{4,}\S*",
+    re.IGNORECASE,
+)
+# 이 값들은 우리가 새로 채워 넣으므로 원래 링크에서 떼어낸다.
+TRIPLE_OWN_PARAMS = ("checkIn", "checkOut", "numberOfAdults", "skipInitialCache")
+# 트리플은 객실마다 '선택' 버튼을 붙인다. 이 말이 하나도 없으면 살 수 있는 방이 없다.
+TRIPLE_ROOM_WORD = "선택"
+TRIPLE_ROOM_LIST_WORDS = ("객실 목록", "객실목록")
+TRIPLE_SOLDOUT_PHRASES = ("판매 완료", "판매완료", "예약 가능한 객실이 없",
+                          "판매중인 객실이 없", "객실이 없습니다")
+
+
+def triple_link(text):
+    """글 안에서 트리플 숙소 링크를 찾아준다. 없으면 빈 문자열."""
+    match = TRIPLE_HOTEL_RE.search(text or "")
+    return match.group(0) if match else ""
+
+
+def triple_detail_url(url, checkin, checkout, guests=2):
+    """등록된 트리플 링크에 감시 중인 날짜·인원을 끼워 넣는다.
+
+    skipInitialCache 를 붙이지 않으면 트리플이 캐시해 둔 기본 날짜 화면을
+    돌려주기 때문에, 우리가 물어본 날짜가 반영되지 않는다.
+    """
+    base, _, query = (url or "").partition("?")
+    kept = [part for part in query.split("&")
+            if part and part.split("=")[0] not in TRIPLE_OWN_PARAMS]
+    kept += [f"checkIn={checkin}", f"checkOut={checkout}",
+             f"numberOfAdults={max(1, int(guests or 1))}", "skipInitialCache=true"]
+    return f"{base}?{'&'.join(kept)}"
+
+
+def _triple_room_section(page_text):
+    """'객실 목록'부터 '기본정보' 앞까지, 즉 파는 방들만 잘라낸다.
+
+    페이지 위쪽의 '최저가 예약' 미리보기에도 값과 버튼이 있어서,
+    그 부분까지 세면 마감된 날짜를 예약 가능으로 잘못 읽는다.
+    """
+    start = min((page_text.find(word) for word in TRIPLE_ROOM_LIST_WORDS
+                 if page_text.find(word) >= 0), default=-1)
+    if start < 0:
+        return ""
+    end = page_text.find("기본정보", start)
+    return page_text[start:end] if end > start else page_text[start:]
+
+
+def analyze_triple_detail(page_text):
+    """트리플 숙소 상세 페이지에서 예약 가능한 객실이 있는지 판단."""
+    page_text = page_text or ""
+    if len(page_text) < 100:
+        return STATUS_UNKNOWN, 0
+
+    section = _triple_room_section(page_text)
+    if not section:
+        if any(phrase in page_text for phrase in TRIPLE_SOLDOUT_PHRASES):
+            return STATUS_SOLDOUT, 0
+        return STATUS_UNKNOWN, 0
+
+    rooms = section.count(TRIPLE_ROOM_WORD)
+    if rooms and find_price(section):
+        return STATUS_AVAILABLE, rooms
+    return STATUS_SOLDOUT, 0
+
+
+def triple_detail_result(browser, watch, link, name="인터파크 트리플"):
+    """등록된 트리플 링크를 열어 빈 객실을 확인한다."""
+    url = triple_detail_url(link, watch["checkin"], watch["checkout"],
+                            watch.get("guests", 2))
+    try:
+        page = browser.page_text(url)
+    except Exception as exc:  # noqa: BLE001
+        return SiteResult("triple", name, STATUS_ERROR, url,
+                          note=str(exc).splitlines()[0][:120])
+
+    status, rooms = analyze_triple_detail(page)
+    if status == STATUS_AVAILABLE:
+        note = f"예약 가능한 객실 {rooms}개"
+    elif status == STATUS_SOLDOUT:
+        note = "이 날짜에 파는 객실이 없어요"
+    else:
+        note = "객실 정보를 읽지 못했어요"
+
+    verified = verification_flag(
+        address_match_score(watch.get("address"), page, ignore=watch.get("query", ""))
+    )
+    if verified is False:
+        note += " · 주소 미확인"
+    offers = ([Offer(title="빈 객실 있음", price=find_price(page), url=url,
+                     address=address_line(page), verified=verified)]
+              if status == STATUS_AVAILABLE else [])
+    return SiteResult("triple", name, status, url, offers, note)
+
+
 def search_term(watch):
     """예약사이트 검색에 쓸 말.
 
@@ -783,6 +886,9 @@ def search_watch(browser, watch, sites=None):
     if "naver" in registered:
         results.append(naver_detail_result(browser, watch, registered,
                                            "네이버 예약(등록 링크)"))
+
+    if watch.get("triple"):
+        results.append(triple_detail_result(browser, watch, watch["triple"]))
 
     for site in sites:
         if "naver" in registered and site["key"] == "naver":

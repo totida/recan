@@ -66,7 +66,9 @@ HELP_TEXT = (
     "    예약 가능한 방이 보이면 바로 알려드려요.\n"
     "    (고르신 주소로 같은 숙소가 맞는지 검색 결과를 다시 대조합니다)\n\n"
     "날짜는 버튼 대신 직접 입력해도 됩니다: 5/2~5/3, 내일 2박, 이번주말\n"
-    "네이버 숙소 링크를 붙여넣어도 등록돼요.\n\n"
+    "네이버 숙소 링크를 붙여넣어도 등록돼요.\n"
+    "인터파크 트리플은 이름으로 검색이 안 돼요. 트리플 숙소 링크를 보내주시면\n"
+    "그 숙소에 연결해 두고 날짜·인원을 바꿔가며 함께 확인해 드려요.\n\n"
     "📌 명령어\n"
     "  목록 — 등록된 알림 보기\n"
     "  삭제 2 — 2번 알림 삭제 (삭제 전체 = 모두 삭제)\n"
@@ -143,12 +145,46 @@ def format_watch_list(watches):
         if watch.get("address"):
             lines.append(f"   📍 {watch['address']}")
         lines.append(f"   {stay_line(watch)}")
+        if watch.get("triple"):
+            lines.append("   🔗 인터파크 트리플 연결됨")
     return "\n".join(lines)
 
 
 # --------------------------------------------------------------------------
 # 등록
 # --------------------------------------------------------------------------
+
+def _ask_triple_target(chat, link):
+    """트리플 링크를 어느 알림에 붙일지 물어본다."""
+    watches = chat["watches"]
+    if not watches:
+        return [reply("먼저 숙소 이름을 보내서 알림을 등록해 주세요. "
+                      "그 다음 트리플 링크를 보내면 함께 감시할게요.")]
+    if len(watches) == 1:
+        return _attach_triple(chat, link, 0)
+
+    chat["state"] = {"step": "await_triple_target", "triple": link}
+    lines = ["🔗 트리플 링크를 받았어요. 어느 숙소에 붙일까요?", ""]
+    for index, watch in enumerate(watches, start=1):
+        lines.append(f"{index}. {watch['query']} · {watch['checkin']} → {watch['checkout']}")
+    return [reply("\n".join(lines), keyboards.watch_keyboard(watches))]
+
+
+def _attach_triple(chat, link, index, edit=False):
+    """고른 알림에 트리플 링크를 저장한다."""
+    chat["state"] = None
+    watches = chat["watches"]
+    if not 0 <= index < len(watches):
+        return [reply("그 번호의 알림이 없어요. '목록'으로 번호를 확인해 주세요.")]
+    watch = watches[index]
+    watch["triple"] = link
+    watch["force"] = True
+    return [reply(
+        f"🔗 '{watch['query']}'에 인터파크 트리플을 연결했어요.\n"
+        "이제 이 숙소는 트리플에서도 함께 확인할게요. 바로 한 번 검색해 볼게요!",
+        edit=edit,
+    )]
+
 
 def _extract_url(text):
     return next((word for word in text.split() if word.startswith("http")), None)
@@ -532,7 +568,17 @@ def handle_text(db, chat_id, text, today=None, lookup=None):
             return [reply("알겠습니다. 숙소 이름부터 다시 알려주세요. (예: 비토애 산청)")]
         return [reply("'예' 또는 '아니오'로 답해주세요. 처음부터 다시 하려면 '취소'.")]
 
-    # 6) 새 요청 — 링크 또는 숙소 이름
+    # 6) 트리플 링크를 붙일 알림 고르기
+    if step == "await_triple_target":
+        if command.isdigit():
+            return _attach_triple(chat, state.get("triple", ""), int(command) - 1)
+        return [reply("목록의 번호를 보내주시거나 버튼을 눌러주세요. (취소하려면 '취소')")]
+
+    # 7) 새 요청 — 링크 또는 숙소 이름
+    triple = search.triple_link(text)
+    if triple:
+        return _ask_triple_target(chat, triple)
+
     url = _extract_url(text)
     if url:
         legacy = storage._watch_from_legacy_url(url)
@@ -587,6 +633,14 @@ def handle_callback(db, chat_id, data, today=None):
 
     if not state:
         return [reply("진행 중인 등록이 없어요. 숙소 이름을 다시 보내주세요.")]
+
+    if action == "triple":
+        if kind == "pick" and value.isdigit():
+            return _attach_triple(chat, state.get("triple", ""), int(value), edit=True)
+        if kind == "cancel":
+            chat["state"] = None
+            return [reply("트리플 링크 연결을 취소했어요.", edit=True)]
+        return []
 
     if action == "place":
         if kind == "pick" and value.isdigit():

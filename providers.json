@@ -174,21 +174,12 @@
       "key": "triple",
       "name": "인터파크 트리플",
       "enabled": false,
-      "_note": "점검 중 — 국내 호텔·리조트",
-      "urls": [
-        "https://triple.guide/hotels?keyword={query}&checkIn={checkin}&checkOut={checkout}",
-        "https://triple.guide/search?keyword={query}",
-        "https://travel.interpark.com/search?q={query}"
-      ],
-      "card_selectors": [
-        "a[href*='/hotels/']",
-        "a[href*='/regions/']",
-        "li[class*='item']",
-        "div[class*='card']"
-      ],
+      "urls": [],
+      "card_selectors": [],
       "wait": 12,
       "scrolls": 3,
-      "probe": true
+      "_note": "이름으로는 찾아갈 수 없어 이름 검색은 끈다. 대신 사용자가 숙소 링크를 보내면 그 링크를 감시한다(search.triple_detail_result).",
+      "_probe_log": "triple.guide/search 는 본문 142자짜리 빈 화면만 준다(?q= ?keyword= 모두). 덕덕고는 site:triple.guide 에 글·명소만 내주고 숙소 페이지를 내주지 않으며, 빙과 구글은 봇 차단(구글은 '비정상 트래픽' 안내), 네이버는 트리플 값을 글로만 보여주고 링크는 네이버 내부 주소로 감싼다. travel.interpark.com/search 는 404. 반면 숙소 상세 페이지는 이름·주소·객실별 가격까지 잘 읽히고, skipInitialCache=true 를 붙이면 우리가 넣은 날짜·인원이 그대로 반영된다."
     },
     {
       "key": "airbnb",

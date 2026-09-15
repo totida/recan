@@ -460,3 +460,112 @@ class UrlTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+TRIPLE_LINK = ("https://triple.guide/hotels/d0e0ae59-1ede-4062-baaf-ebc7af354718"
+               "?regionId=41ef0101-2663-4f1f-a117-8c5490f4cf44&cityId=KM2144459757"
+               "&checkIn=2026-10-04&checkOut=2026-10-05&numberOfAdults=2")
+
+TRIPLE_AVAILABLE = (
+    "김해시 숙소 모두 보기\n김해 덴바스타 테마 키즈호텔 펜션\n펜션\n"
+    "최저가 예약\n11.20(금) - 11.21(토)\n성인 2\n500,000원\n1박, 세금포함\n"
+    "객실 목록\n1박, 세금포함\n룸필터\n"
+    "아이스크림룸 - 미온수 무료\n56.2 m²\n최대 5인\n4인 기준\n1개 남음!\n280,000원\n선택\n"
+    "기차여행룸 - 미온수 무료\n56.2 m²\n최대 5인\n4인 기준\n1개 남음!\n280,000원\n선택\n"
+    "기본정보\n주소\n(50802) 경상남도 김해시 생림면 인제로 545-20\n전화\n+050350528947\n"
+)
+
+TRIPLE_SOLDOUT = (
+    "김해시 숙소 모두 보기\n김해 덴바스타 테마 키즈호텔 펜션\n펜션\n"
+    "최저가 예약\n11.20(금) - 11.21(토)\n성인 2\n판매 완료\n일정 변경\n"
+    "객실 목록\n1박, 세금포함\n룸필터\n예약 가능한 객실이 없습니다\n"
+    "기본정보\n주소\n(50802) 경상남도 김해시 생림면 인제로 545-20\n전화\n+050350528947\n"
+)
+
+
+class TripleLinkTest(unittest.TestCase):
+    def test_finds_link_in_message(self):
+        self.assertEqual(search.triple_link(f"이거 봐줘 {TRIPLE_LINK} 고마워"),
+                         TRIPLE_LINK)
+
+    def test_ignores_other_links(self):
+        self.assertEqual(search.triple_link("https://triple.guide/articles/123"), "")
+        self.assertEqual(search.triple_link("https://m.place.naver.com/1234"), "")
+
+    def test_puts_our_dates_and_guests_in(self):
+        url = search.triple_detail_url(TRIPLE_LINK, "2026-11-20", "2026-11-21", 4)
+        self.assertIn("checkIn=2026-11-20", url)
+        self.assertIn("checkOut=2026-11-21", url)
+        self.assertIn("numberOfAdults=4", url)
+        # 원래 날짜는 남아 있으면 안 된다
+        self.assertNotIn("checkIn=2026-10-04", url)
+        self.assertNotIn("numberOfAdults=2", url)
+        # 지역 정보는 그대로 둔다
+        self.assertIn("cityId=KM2144459757", url)
+
+    def test_forces_fresh_render(self):
+        # 이 값이 없으면 트리플이 캐시된 기본 날짜 화면을 준다
+        url = search.triple_detail_url(TRIPLE_LINK, "2026-11-20", "2026-11-21", 2)
+        self.assertIn("skipInitialCache=true", url)
+        again = search.triple_detail_url(url, "2026-12-01", "2026-12-02", 2)
+        self.assertEqual(again.count("skipInitialCache=true"), 1)
+
+    def test_link_without_query(self):
+        url = search.triple_detail_url("https://triple.guide/hotels/abc",
+                                       "2026-11-20", "2026-11-21", 2)
+        self.assertTrue(url.startswith("https://triple.guide/hotels/abc?"))
+
+
+class TripleDetailTest(unittest.TestCase):
+    def test_rooms_on_sale(self):
+        status, rooms = search.analyze_triple_detail(TRIPLE_AVAILABLE)
+        self.assertEqual(status, search.STATUS_AVAILABLE)
+        self.assertEqual(rooms, 2)
+
+    def test_sold_out(self):
+        status, rooms = search.analyze_triple_detail(TRIPLE_SOLDOUT)
+        self.assertEqual(status, search.STATUS_SOLDOUT)
+        self.assertEqual(rooms, 0)
+
+    def test_preview_price_alone_is_not_available(self):
+        # '최저가 예약' 미리보기에만 값이 있고 객실 목록은 마감인 경우
+        self.assertEqual(search.analyze_triple_detail(TRIPLE_SOLDOUT)[0],
+                         search.STATUS_SOLDOUT)
+
+    def test_empty_page_is_unknown(self):
+        self.assertEqual(search.analyze_triple_detail("잠시만요")[0],
+                         search.STATUS_UNKNOWN)
+
+
+class TripleSearchWatchTest(unittest.TestCase):
+    class FakeBrowser:
+        def __init__(self, text):
+            self.text = text
+            self.opened = []
+
+        def page_text(self, url, **kwargs):
+            self.opened.append(url)
+            return self.text
+
+        def collect_cards(self, *args, **kwargs):
+            return []
+
+        def body_text(self, limit=2000):
+            return ""
+
+    def test_registered_link_is_checked(self):
+        watch = {"query": "덴바스타", "keyword": "덴바스타", "checkin": "2026-11-20",
+                 "checkout": "2026-11-21", "guests": 2, "triple": TRIPLE_LINK,
+                 "address": "경상남도 김해시 생림면 인제로 545-20"}
+        browser = self.FakeBrowser(TRIPLE_AVAILABLE)
+        results = search.search_watch(browser, watch, sites=[])
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0].key, "triple")
+        self.assertTrue(results[0].available)
+        self.assertIn("checkIn=2026-11-20", browser.opened[0])
+
+    def test_no_link_means_no_triple_result(self):
+        watch = {"query": "덴바스타", "keyword": "덴바스타", "checkin": "2026-11-20",
+                 "checkout": "2026-11-21", "guests": 2}
+        results = search.search_watch(self.FakeBrowser(""), watch, sites=[])
+        self.assertEqual(results, [])

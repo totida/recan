@@ -76,7 +76,8 @@ def default_db():
     return {"version": SCHEMA_VERSION, "last_update_id": 0, "chats": {}}
 
 
-def new_watch(query, checkin, checkout, guests=2, url=None, address="", keyword=""):
+def new_watch(query, checkin, checkout, guests=2, url=None, address="", keyword="",
+              triple=None):
     return {
         "id": uuid.uuid4().hex[:8],
         "query": query,             # 표시용 이름(네이버 정식 명칭일 수 있음)
@@ -86,6 +87,7 @@ def new_watch(query, checkin, checkout, guests=2, url=None, address="", keyword=
         "checkout": checkout,        # "YYYY-MM-DD"
         "guests": guests,
         "url": url,                  # 네이버 등 특정 숙소 상세 링크(선택)
+        "triple": triple or None,    # 인터파크 트리플 숙소 링크(선택)
         "created_at": int(time.time()),
         "last_searched": 0,
         "last_notified": 0,
