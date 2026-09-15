@@ -113,7 +113,7 @@
 | `search.py` 의 `address_*` | 검색 결과 주소 재검증 |
 | `search.py` | 사이트 검색·화면 해석 엔진 (Selenium) |
 | `providers.json` | **검색할 사이트 설정 (URL·선택자)** |
-| `storage.py` | `users.json` 저장 및 구버전 자동 마이그레이션 |
+| `storage.py` | 등록 내용 저장(Gist 또는 파일) 및 구버전 자동 마이그레이션 |
 | `telegram_api.py` | 텔레그램 API 래퍼 |
 | `tests/` | 브라우저 없이 도는 단위 테스트 |
 
@@ -144,7 +144,11 @@ GitHub 저장소 → Settings → Secrets → Actions 에 `TELEGRAM_TOKEN` 을 �
 
 1. GitHub 토큰 발급 — `gist` 권한만 있으면 됩니다 → 저장소 시크릿 `GIST_TOKEN`
 2. secret gist 생성 (파일명 `users.json`, 내용 `{}`) → 주소 끝의 id 를 `GIST_ID`
-3. 워크플로에 두 값을 env 로 넘기면 끝. 저장소의 `users.json` 내용이 자동으로 옮겨갑니다.
+3. 워크플로에 두 값을 env 로 넘기면 끝입니다.
+
+`users.json` 은 저장소에 없습니다. Gist 또는 봇이 도는 서버의 파일에만 존재합니다.
+내용을 보려면 GitHub 에 로그인해 <https://gist.github.com> 에서 열면 되고,
+저장할 때마다 Revisions 에 이력이 쌓여 예전 상태로 되돌릴 수도 있습니다.
 
 Gist 를 쓰는 동안에는 저장소에 아무것도 커밋하지 않습니다.
 Gist 를 읽지 못하면 **빈 상태로 시작하지 않고 멈춥니다** — 그래야 다음 저장 때
