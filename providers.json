@@ -8,7 +8,8 @@
     "모두 실패하면 페이지 전체 링크에서 숙소 이름을 찾는 방식으로 대체합니다.",
     "follow_place: 검색 결과의 네이버 장소 링크를 따라가 객실 상태까지 확인합니다.",
     "enabled 를 false 로 두면 해당 사이트는 건너뜁니다.",
-    "국내 펜션·글램핑은 야놀자·네이버에, 호텔·리조트는 아고다·부킹닷컴·트립닷컴에 주로 있습니다."
+    "국내 펜션·글램핑은 야놀자·네이버에, 호텔·리조트는 아고다·부킹닷컴·트립닷컴에 주로 있습니다.",
+    "probe: 꺼져 있어도 점검 도구가 확인합니다. 쓸 만하면 enabled 를 true 로 바꾸세요."
   ],
   "place_lookup": {
     "_comment": "숙소 이름 → 주소 후보를 찾는 곳(네이버). 위 URL부터 차례로 시도합니다.",
@@ -149,6 +150,63 @@
       "wait": 15,
       "scrolls": 4,
       "_note": "점검 3회 모두 검색 결과가 그려지지 않음(필터 UI 900자만 읽힘). 대기 15초·주소 3개를 시도해도 동일해 꺼둠."
+    },
+    {
+      "key": "camfit",
+      "name": "캠핏",
+      "enabled": false,
+      "_note": "점검 중 — 글램핑·캠핑 전문",
+      "urls": [
+        "https://camfit.co.kr/search?keyword={query}",
+        "https://camfit.co.kr/search/result?keyword={query}",
+        "https://camfit.co.kr/campsites?keyword={query}"
+      ],
+      "card_selectors": [
+        "a[href*='/campsite']",
+        "li[class*='item']",
+        "div[class*='card']"
+      ],
+      "wait": 10,
+      "scrolls": 3,
+      "probe": true
+    },
+    {
+      "key": "triple",
+      "name": "인터파크 트리플",
+      "enabled": false,
+      "_note": "점검 중 — 국내 호텔·리조트",
+      "urls": [
+        "https://triple.guide/hotels?keyword={query}&checkIn={checkin}&checkOut={checkout}",
+        "https://triple.guide/search?keyword={query}",
+        "https://travel.interpark.com/search?q={query}"
+      ],
+      "card_selectors": [
+        "a[href*='/hotels/']",
+        "a[href*='/regions/']",
+        "li[class*='item']",
+        "div[class*='card']"
+      ],
+      "wait": 12,
+      "scrolls": 3,
+      "probe": true
+    },
+    {
+      "key": "airbnb",
+      "name": "에어비앤비",
+      "enabled": false,
+      "_note": "점검 중 — 펜션·독채. 호스트가 붙인 제목이라 이름이 다를 수 있음",
+      "urls": [
+        "https://www.airbnb.co.kr/s/{query}/homes?checkin={checkin}&checkout={checkout}&adults={guests}",
+        "https://www.airbnb.co.kr/s/{query}/homes"
+      ],
+      "card_selectors": [
+        "div[itemprop='itemListElement']",
+        "a[href*='/rooms/']",
+        "div[data-testid='card-container']"
+      ],
+      "wait": 12,
+      "scrolls": 3,
+      "probe": true
     }
   ]
 }
