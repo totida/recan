@@ -1,0 +1,35 @@
+name: 주소 하나 열어보기
+
+# 검색 페이지가 아니라 특정 숙소 상세 페이지를 감시할 수 있는지 확인할 때 쓴다.
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: '열어볼 주소 (숙소 상세 페이지 등)'
+        required: true
+      name:
+        description: '숙소 이름 (선택)'
+        required: false
+      address:
+        description: '주소 (선택, 대조 확인용)'
+        required: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: 주소 열어보기
+        run: |
+          python tools/check_url.py \
+            --url "${{ inputs.url }}" \
+            --name "${{ inputs.name }}" \
+            --address "${{ inputs.address }}"
