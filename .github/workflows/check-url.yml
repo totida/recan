@@ -16,7 +16,10 @@ on:
       chars:
         description: '본문을 몇 글자까지 볼지 (기본 1200)'
         required: false
-        default: '1200' 
+        default: '1200'
+      links:
+        description: "이 문구가 든 링크만 뽑아보기 (예: triple.guide/hotels)"
+        required: false
 
 jobs:
   check:
@@ -37,4 +40,5 @@ jobs:
             --url "${{ inputs.url }}" \
             --name "${{ inputs.name }}" \
             --address "${{ inputs.address }}" \
-            --chars "${{ inputs.chars || 1200 }}"
+            --chars "${{ inputs.chars || 1200 }}" \
+            --links "${{ inputs.links }}"

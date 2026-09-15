@@ -22,6 +22,8 @@ def main():
     parser.add_argument("--name", default="", help="이 이름이 페이지에 있는지 확인")
     parser.add_argument("--wait", type=int, default=12)
     parser.add_argument("--chars", type=int, default=1200, help="본문을 몇 글자까지 볼지")
+    parser.add_argument("--links", default="",
+                        help="이 문구가 든 링크만 뽑아서 보여준다 (예: triple.guide/hotels)")
     args = parser.parse_args()
 
     browser = search.Browser()
@@ -52,6 +54,22 @@ def main():
             score = search.address_match_score(args.address, text, ignore=args.name)
             print(f"주소 일치도: {score:.2f} → {search.verification_flag(score)}")
         print(f"주소로 보이는 줄: {search.address_line(text) or '(없음)'}")
+
+        if args.links:
+            print(f"\n--- '{args.links}' 가 든 링크 ---")
+            cards = browser._pick_cards(["a"])
+            hits, seen = 0, set()
+            for card in cards:
+                url = card.get("url", "")
+                if args.links in url and url not in seen:
+                    seen.add(url)
+                    hits += 1
+                    print(f"  {hits}. {card['text'].splitlines()[0][:60]}")
+                    print(f"     {url[:160]}")
+                    if hits >= 8:
+                        break
+            if not hits:
+                print("  (없음)")
 
         print(f"\n--- 본문 앞 {args.chars}자 ---")
         print(text[:args.chars].replace("\n", " / "))
