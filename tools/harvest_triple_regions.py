@@ -66,25 +66,30 @@ def harvest(limit=80):
             log(f"링크에서 {len(regions)}곳을 찾았습니다.")
             return regions
 
-        # 3) 링크가 없으면 하나씩 눌러 보고 주소가 바뀌는지 확인한다
-        names = []
-        for element in driver.find_elements(By.CSS_SELECTOR, "li, button, div[role='button']"):
-            text = (element.text or "").strip()
-            if 1 < len(text) <= 20 and "\n" not in text and text != DOMESTIC_TAB:
-                names.append(text)
+        # 3) 링크가 없으면 화면에 보이는 도시 이름을 하나씩 눌러 본다.
+        #    도시 항목이 어떤 태그인지 사이트마다 달라서, 글자를 기준으로 잡는다.
+        body = driver.find_element(By.TAG_NAME, "body").text
+        log(f"국내도시 화면 글자 {len(body)}자: {body[:300]!r}")
+
+        skip = {"인기도시", "해외도시", "국내도시", "닫기", "검색", "취소"}
+        names = [line.strip() for line in body.splitlines()
+                 if 1 < len(line.strip()) <= 20 and line.strip() not in skip
+                 and "," not in line]
         names = list(dict.fromkeys(names))[:limit]
-        log(f"눌러볼 후보 {len(names)}곳: {', '.join(names[:10])} …")
+        log(f"눌러볼 후보 {len(names)}곳: {', '.join(names[:15])} …")
 
         for name in names:
             try:
                 targets = driver.find_elements(By.XPATH, f"//*[text()='{name}']")
-                if not targets or not _click(driver, targets[0]):
+                if not targets or not _click(driver, targets[-1]):
                     continue
                 time.sleep(2.5)
                 match = REGION_RE.search(driver.current_url)
                 if match:
                     regions[name] = match.group(1)
                     log(f"  {name} → {match.group(1)}")
+                elif driver.current_url != SEARCH_URL:
+                    log(f"  {name}: {driver.current_url[:90]}")
                 driver.get(SEARCH_URL)
                 time.sleep(4)
                 for element in driver.find_elements(By.XPATH, f"//*[text()='{DOMESTIC_TAB}']"):
