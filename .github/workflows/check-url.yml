@@ -13,6 +13,10 @@ on:
       address:
         description: '주소 (선택, 대조 확인용)'
         required: false
+      chars:
+        description: '본문을 몇 글자까지 볼지 (기본 1200)'
+        required: false
+        default: '1200' 
 
 jobs:
   check:
@@ -32,4 +36,5 @@ jobs:
           python tools/check_url.py \
             --url "${{ inputs.url }}" \
             --name "${{ inputs.name }}" \
-            --address "${{ inputs.address }}"
+            --address "${{ inputs.address }}" \
+            --chars "${{ inputs.chars || 1200 }}"
