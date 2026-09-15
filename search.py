@@ -401,9 +401,12 @@ def _load_config(path=None):
         return json.load(f)
 
 
-def load_sites(path=None):
-    config = _load_config(path)
-    return [site for site in config.get("sites", []) if site.get("enabled", True)]
+def load_sites(path=None, include_disabled=False):
+    """켜져 있는 사이트 목록. 점검할 때는 꺼진 것도 포함해서 본다."""
+    sites = _load_config(path).get("sites", [])
+    if include_disabled:
+        return list(sites)
+    return [site for site in sites if site.get("enabled", True)]
 
 
 def site_urls(site):

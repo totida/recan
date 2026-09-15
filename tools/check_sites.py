@@ -84,9 +84,12 @@ def main():
         # 2) 예약사이트별 검색
         watch = {"query": args.query, "checkin": args.checkin, "checkout": args.checkout,
                  "guests": args.guests, "address": address}
-        for site in search.load_sites():
+        candidates = [s for s in search.load_sites(include_disabled=True)
+                      if s.get("enabled", True) or s.get("probe")]
+        for site in candidates:
             print("\n" + "=" * 70)
-            print(f"🏨 {site['name']}")
+            state = "" if site.get("enabled", True) else "  (꺼짐 — 점검만)"
+            print(f"🏨 {site['name']}{state}")
             best = None
             for index, template in enumerate(search.site_urls(site), start=1):
                 url = search.build_url(template, args.query, args.checkin,
@@ -138,7 +141,11 @@ def main():
                     break
                 best = best or ("none" if cards else "empty", url)
 
-            if best is None:
+            if not site.get("enabled", True):
+                verdict = {"ok": "✅ 쓸 수 있습니다", "not_listed": "🚫 이 숙소는 취급 안 함",
+                           "none": "❌ 검색 결과에 없음", "empty": "❌ 화면을 못 읽음"}
+                print(f"\n  판정: {verdict.get(best[0] if best else '', '❌ 페이지를 열지 못함')}")
+            elif best is None:
                 problems.append(f"{site['name']}: 모든 주소에서 페이지를 열지 못함")
             elif best[0] == "empty":
                 problems.append(f"{site['name']}: 카드를 하나도 못 읽음 → card_selectors 확인")

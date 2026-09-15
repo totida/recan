@@ -428,6 +428,21 @@ class UrlTest(unittest.TestCase):
                                        "2026-05-03", 2)
                 self.assertTrue(url.startswith("https://"), site["key"])
 
+    def test_disabled_sites_are_excluded_by_default(self):
+        enabled = {s["key"] for s in search.load_sites()}
+        every = {s["key"] for s in search.load_sites(include_disabled=True)}
+        self.assertTrue(enabled < every)          # 꺼진 사이트가 존재한다
+        self.assertNotIn("hanatour", enabled)     # 동작하지 않아 꺼둔 사이트
+
+    def test_probe_sites_are_marked(self):
+        probes = [s["key"] for s in search.load_sites(include_disabled=True)
+                  if s.get("probe")]
+        for key in probes:
+            self.assertFalse(
+                next(s for s in search.load_sites(include_disabled=True)
+                     if s["key"] == key).get("enabled", True),
+                f"{key} 는 점검 중이므로 꺼져 있어야 한다")
+
     def test_site_urls_accepts_single_url(self):
         self.assertEqual(search.site_urls({"url": "https://a"}), ["https://a"])
         self.assertEqual(search.site_urls({"urls": ["https://a", "https://b"]}),
