@@ -66,29 +66,59 @@ def harvest(limit=80):
             log(f"링크에서 {len(regions)}곳을 찾았습니다.")
             return regions
 
-        # 3) 링크가 없으면 화면에 보이는 도시 이름을 하나씩 눌러 본다.
-        #    도시 항목이 어떤 태그인지 사이트마다 달라서, 글자를 기준으로 잡는다.
+        # 3) 도시 항목이 실제로 어떤 요소인지 들여다본다.
+        #    누르면 앱 설치 안내창이 떠서 이동이 막히므로, 창을 닫고 다시 눌러 본다.
         body = driver.find_element(By.TAG_NAME, "body").text
-        log(f"국내도시 화면 글자 {len(body)}자: {body[:300]!r}")
+        log(f"국내도시 화면 글자 {len(body)}자")
 
-        skip = {"인기도시", "해외도시", "국내도시", "닫기", "검색", "취소"}
+        skip = {"인기도시", "해외도시", "국내도시", "국내", "어디론가 떠나고 싶을 때"}
         names = [line.strip() for line in body.splitlines()
                  if 1 < len(line.strip()) <= 20 and line.strip() not in skip
                  and "," not in line]
         names = list(dict.fromkeys(names))[:limit]
-        log(f"눌러볼 후보 {len(names)}곳: {', '.join(names[:15])} …")
+        log(f"도시 {len(names)}곳: {', '.join(names)}")
 
+        # 3-1) 첫 도시의 생김새를 위로 세 겹까지 찍어 본다.
+        if names:
+            for element in driver.find_elements(By.XPATH, f"//*[text()='{names[0]}']")[:2]:
+                node = element
+                for depth in range(4):
+                    try:
+                        html = (node.get_attribute("outerHTML") or "")[:220]
+                        log(f"  [{names[0]} 위로 {depth}겹] {node.tag_name} "
+                            f"href={node.get_attribute('href')} :: {html}")
+                        node = node.find_element(By.XPATH, "..")
+                    except Exception:  # noqa: BLE001
+                        break
+
+        # 3-2) 안내창을 닫고 다시 눌러 본다.
+        closers = ("닫기", "괜찮아요", "웹으로 볼게요", "다음에", "취소", "✕", "×")
         for name in names:
             try:
                 targets = driver.find_elements(By.XPATH, f"//*[text()='{name}']")
                 if not targets or not _click(driver, targets[-1]):
                     continue
-                time.sleep(2.5)
+                time.sleep(2)
+                if "modal" in driver.current_url or "app-install" in driver.current_url:
+                    for word in closers:
+                        buttons = driver.find_elements(By.XPATH, f"//*[text()='{word}']")
+                        if buttons and _click(driver, buttons[-1]):
+                            log(f"  안내창을 '{word}' 로 닫았습니다.")
+                            time.sleep(1.5)
+                            break
+                    else:
+                        from selenium.webdriver.common.keys import Keys
+                        driver.find_element(By.TAG_NAME, "body").send_keys(Keys.ESCAPE)
+                        time.sleep(1.5)
+                    targets = driver.find_elements(By.XPATH, f"//*[text()='{name}']")
+                    if targets:
+                        _click(driver, targets[-1])
+                        time.sleep(2.5)
                 match = REGION_RE.search(driver.current_url)
                 if match:
                     regions[name] = match.group(1)
                     log(f"  {name} → {match.group(1)}")
-                elif driver.current_url != SEARCH_URL:
+                else:
                     log(f"  {name}: {driver.current_url[:90]}")
                 driver.get(SEARCH_URL)
                 time.sleep(4)
