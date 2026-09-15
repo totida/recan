@@ -1,8 +1,12 @@
 name: 트리플 지역 주소록 수집
 
 # 한 번만 돌려서 결과를 triple_regions.json 에 넣어두면 됩니다.
+# 수집 도구를 고쳐서 올릴 때마다 자동으로 한 번 돌아갑니다.
 on:
   workflow_dispatch:
+  push:
+    paths:
+      - 'tools/harvest_triple_regions.py'
 
 jobs:
   harvest:
