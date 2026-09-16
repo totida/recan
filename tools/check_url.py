@@ -8,6 +8,7 @@
 
 import argparse
 import os
+import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -24,6 +25,8 @@ def main():
     parser.add_argument("--chars", type=int, default=1200, help="본문을 몇 글자까지 볼지")
     parser.add_argument("--links", default="",
                         help="이 문구가 든 링크만 뽑아서 보여준다 (예: triple.guide/hotels)")
+    parser.add_argument("--grep", default="",
+                        help="페이지 소스에서 이 정규식과 맞는 부분을 뽑아본다")
     args = parser.parse_args()
 
     browser = search.Browser()
@@ -70,6 +73,24 @@ def main():
                         break
             if not hits:
                 print("  (없음)")
+
+        if args.grep:
+            print(f"\n--- 소스에서 '{args.grep}' 찾기 ---")
+            try:
+                source = browser.driver.page_source
+            except Exception as exc:  # noqa: BLE001
+                source = ""
+                print(f"  (소스를 읽지 못했습니다: {str(exc).splitlines()[0][:80]})")
+            found = []
+            for match in re.finditer(args.grep, source):
+                text = match.group(0)
+                if text not in found:
+                    found.append(text)
+                if len(found) >= 40:
+                    break
+            print(f"  {len(found)}개")
+            for index, text in enumerate(found, start=1):
+                print(f"  {index}. {text[:160]}")
 
         print(f"\n--- 본문 앞 {args.chars}자 ---")
         print(text[:args.chars].replace("\n", " / "))

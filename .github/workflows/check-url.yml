@@ -20,6 +20,9 @@ on:
       links:
         description: "이 문구가 든 링크만 뽑아보기 (예: triple.guide/hotels)"
         required: false
+      grep:
+        description: "페이지 소스에서 찾아볼 정규식 (예: regions/[0-9a-f-]{36})"
+        required: false
 
 jobs:
   check:
@@ -41,4 +44,5 @@ jobs:
             --name "${{ inputs.name }}" \
             --address "${{ inputs.address }}" \
             --chars "${{ inputs.chars || 1200 }}" \
-            --links "${{ inputs.links }}"
+            --links "${{ inputs.links }}" \
+            --grep "${{ inputs.grep }}"

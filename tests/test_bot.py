@@ -541,3 +541,81 @@ class StorageTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+TRIPLE_URL = ("https://triple.guide/hotels/d0e0ae59-1ede-4062-baaf-ebc7af354718"
+              "?regionId=41ef0101-2663-4f1f-a117-8c5490f4cf44&checkIn=2026-10-04"
+              "&checkOut=2026-10-05&numberOfAdults=2")
+
+
+class TripleLinkConversationTest(unittest.TestCase):
+    def setUp(self):
+        self.db = storage.default_db()
+
+    def say(self, text):
+        return bot.handle_text(self.db, CHAT, text, today=TODAY)
+
+    def tap(self, data):
+        return bot.handle_callback(self.db, CHAT, data, today=TODAY)
+
+    def state(self):
+        return storage.get_chat(self.db, CHAT)["state"]
+
+    def watches(self):
+        return storage.get_chat(self.db, CHAT)["watches"]
+
+    def register(self, line):
+        self.say(line)
+        self.say("건너뛰기")
+        if self.state() and self.state()["step"] == "await_guests":
+            self.say("2")
+        return self.say("예")
+
+    def test_link_without_any_watch_asks_to_register_first(self):
+        replies = self.say(TRIPLE_URL)
+        self.assertIn("먼저 숙소 이름을", texts(replies))
+        self.assertIsNone(self.state())
+
+    def test_single_watch_gets_the_link_right_away(self):
+        self.register("덴바스타 10/4~10/5")
+        replies = self.say(TRIPLE_URL)
+        self.assertIn("트리플", texts(replies))
+        self.assertEqual(self.watches()[0]["triple"], TRIPLE_URL)
+        self.assertTrue(self.watches()[0]["force"])
+        self.assertIsNone(self.state())
+
+    def test_several_watches_ask_which_one(self):
+        self.register("덴바스타 10/4~10/5")
+        self.register("쏠비치 남해 11/1~11/2")
+        replies = self.say(f"이거요 {TRIPLE_URL}")
+        self.assertIn("어느 숙소에 붙일까요", texts(replies))
+        self.assertIn("triple:pick:1", buttons(replies))
+        self.assertEqual(self.state()["step"], "await_triple_target")
+
+        self.tap("triple:pick:1")
+        self.assertIsNone(self.watches()[0]["triple"])
+        self.assertEqual(self.watches()[1]["triple"], TRIPLE_URL)
+
+    def test_number_works_instead_of_button(self):
+        self.register("덴바스타 10/4~10/5")
+        self.register("쏠비치 남해 11/1~11/2")
+        self.say(TRIPLE_URL)
+        self.say("1")
+        self.assertEqual(self.watches()[0]["triple"], TRIPLE_URL)
+
+    def test_cancel_leaves_watches_alone(self):
+        self.register("덴바스타 10/4~10/5")
+        self.register("쏠비치 남해 11/1~11/2")
+        self.say(TRIPLE_URL)
+        self.tap("triple:cancel")
+        self.assertIsNone(self.watches()[0]["triple"])
+        self.assertIsNone(self.state())
+
+    def test_list_shows_the_connection(self):
+        self.register("덴바스타 10/4~10/5")
+        self.say(TRIPLE_URL)
+        self.assertIn("인터파크 트리플 연결됨", texts(self.say("목록")))
+
+    def test_naver_link_still_registers_a_new_watch(self):
+        replies = self.say("https://m.place.naver.com/accommodation/1259756405/room")
+        self.assertNotIn("어느 숙소에 붙일까요", texts(replies))

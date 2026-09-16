@@ -460,3 +460,209 @@ class UrlTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+TRIPLE_LINK = ("https://triple.guide/hotels/d0e0ae59-1ede-4062-baaf-ebc7af354718"
+               "?regionId=41ef0101-2663-4f1f-a117-8c5490f4cf44&cityId=KM2144459757"
+               "&checkIn=2026-10-04&checkOut=2026-10-05&numberOfAdults=2")
+
+TRIPLE_AVAILABLE = (
+    "김해시 숙소 모두 보기\n김해 덴바스타 테마 키즈호텔 펜션\n펜션\n"
+    "최저가 예약\n11.20(금) - 11.21(토)\n성인 2\n500,000원\n1박, 세금포함\n"
+    "객실 목록\n1박, 세금포함\n룸필터\n"
+    "아이스크림룸 - 미온수 무료\n56.2 m²\n최대 5인\n4인 기준\n1개 남음!\n280,000원\n선택\n"
+    "기차여행룸 - 미온수 무료\n56.2 m²\n최대 5인\n4인 기준\n1개 남음!\n280,000원\n선택\n"
+    "기본정보\n주소\n(50802) 경상남도 김해시 생림면 인제로 545-20\n전화\n+050350528947\n"
+)
+
+TRIPLE_SOLDOUT = (
+    "김해시 숙소 모두 보기\n김해 덴바스타 테마 키즈호텔 펜션\n펜션\n"
+    "최저가 예약\n11.20(금) - 11.21(토)\n성인 2\n판매 완료\n일정 변경\n"
+    "객실 목록\n1박, 세금포함\n룸필터\n예약 가능한 객실이 없습니다\n"
+    "기본정보\n주소\n(50802) 경상남도 김해시 생림면 인제로 545-20\n전화\n+050350528947\n"
+)
+
+
+class TripleLinkTest(unittest.TestCase):
+    def test_finds_link_in_message(self):
+        self.assertEqual(search.triple_link(f"이거 봐줘 {TRIPLE_LINK} 고마워"),
+                         TRIPLE_LINK)
+
+    def test_ignores_other_links(self):
+        self.assertEqual(search.triple_link("https://triple.guide/articles/123"), "")
+        self.assertEqual(search.triple_link("https://m.place.naver.com/1234"), "")
+
+    def test_puts_our_dates_and_guests_in(self):
+        url = search.triple_detail_url(TRIPLE_LINK, "2026-11-20", "2026-11-21", 4)
+        self.assertIn("checkIn=2026-11-20", url)
+        self.assertIn("checkOut=2026-11-21", url)
+        self.assertIn("numberOfAdults=4", url)
+        # 원래 날짜는 남아 있으면 안 된다
+        self.assertNotIn("checkIn=2026-10-04", url)
+        self.assertNotIn("numberOfAdults=2", url)
+        # 지역 정보는 그대로 둔다
+        self.assertIn("cityId=KM2144459757", url)
+
+    def test_forces_fresh_render(self):
+        # 이 값이 없으면 트리플이 캐시된 기본 날짜 화면을 준다
+        url = search.triple_detail_url(TRIPLE_LINK, "2026-11-20", "2026-11-21", 2)
+        self.assertIn("skipInitialCache=true", url)
+        again = search.triple_detail_url(url, "2026-12-01", "2026-12-02", 2)
+        self.assertEqual(again.count("skipInitialCache=true"), 1)
+
+    def test_link_without_query(self):
+        url = search.triple_detail_url("https://triple.guide/hotels/abc",
+                                       "2026-11-20", "2026-11-21", 2)
+        self.assertTrue(url.startswith("https://triple.guide/hotels/abc?"))
+
+
+class TripleDetailTest(unittest.TestCase):
+    def test_rooms_on_sale(self):
+        status, rooms = search.analyze_triple_detail(TRIPLE_AVAILABLE)
+        self.assertEqual(status, search.STATUS_AVAILABLE)
+        self.assertEqual(rooms, 2)
+
+    def test_sold_out(self):
+        status, rooms = search.analyze_triple_detail(TRIPLE_SOLDOUT)
+        self.assertEqual(status, search.STATUS_SOLDOUT)
+        self.assertEqual(rooms, 0)
+
+    def test_preview_price_alone_is_not_available(self):
+        # '최저가 예약' 미리보기에만 값이 있고 객실 목록은 마감인 경우
+        self.assertEqual(search.analyze_triple_detail(TRIPLE_SOLDOUT)[0],
+                         search.STATUS_SOLDOUT)
+
+    def test_empty_page_is_unknown(self):
+        self.assertEqual(search.analyze_triple_detail("잠시만요")[0],
+                         search.STATUS_UNKNOWN)
+
+
+class TripleSearchWatchTest(unittest.TestCase):
+    class FakeBrowser:
+        def __init__(self, text):
+            self.text = text
+            self.opened = []
+
+        def page_text(self, url, **kwargs):
+            self.opened.append(url)
+            return self.text
+
+        def collect_cards(self, *args, **kwargs):
+            return []
+
+        def body_text(self, limit=2000):
+            return ""
+
+    def test_registered_link_is_checked(self):
+        watch = {"query": "덴바스타", "keyword": "덴바스타", "checkin": "2026-11-20",
+                 "checkout": "2026-11-21", "guests": 2, "triple": TRIPLE_LINK,
+                 "address": "경상남도 김해시 생림면 인제로 545-20"}
+        browser = self.FakeBrowser(TRIPLE_AVAILABLE)
+        results = search.search_watch(browser, watch, sites=[])
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0].key, "triple")
+        self.assertTrue(results[0].available)
+        self.assertIn("checkIn=2026-11-20", browser.opened[0])
+
+    def test_no_link_means_no_triple_result(self):
+        watch = {"query": "덴바스타", "keyword": "덴바스타", "checkin": "2026-11-20",
+                 "checkout": "2026-11-21", "guests": 2}
+        results = search.search_watch(self.FakeBrowser(""), watch, sites=[])
+        self.assertEqual(results, [])
+
+
+class WrongPlaceTest(unittest.TestCase):
+    """이름이 살짝 겹치는 다른 숙소를 걸러내는지 (실제로 겪은 오탐)."""
+
+    ADDRESS = "경상북도 경주시 천북면 천북남로 558-27 스테이루나"
+
+    def test_one_letter_coincidence_is_not_a_match(self):
+        # '사우나'의 '나' 한 글자 때문에 '스테이루나'로 통했었다
+        for text in ("향남 스테이13 호텔\n사우나\n150,000원",
+                     "향남 스테이13 호텔\n루프탑\n150,000원",
+                     "향남 스테이13 호텔\n150,000원\n스파,사우나 이용 가능"):
+            self.assertFalse(search.card_matches("스테이루나", text), text)
+
+    def test_real_place_still_matches(self):
+        self.assertTrue(search.card_matches(
+            "스테이루나", "스테이루나 펜션\n경주시 천북면\n250,000원"))
+
+    def test_name_inserted_in_the_middle_still_matches(self):
+        # 이름 중간에 단어가 끼어드는 경우는 계속 통해야 한다
+        self.assertTrue(search.card_matches(
+            "비토애 산청", "사천 비토애풀빌라펜션&글램핑\n460,000원"))
+
+    def test_other_city_is_dropped(self):
+        cards = [{"text": "스테이루나 호텔\n경기 화성시 향남읍\n150,000원",
+                  "url": "https://example.com/1"}]
+        status, offers = search.analyze_cards("스테이루나", cards,
+                                              address=self.ADDRESS)
+        self.assertEqual(status, search.STATUS_NONE)
+        self.assertEqual(offers, [])
+
+    def test_same_city_is_kept(self):
+        cards = [{"text": "스테이루나 펜션\n경상북도 경주시 천북면\n250,000원",
+                  "url": "https://example.com/2"}]
+        status, offers = search.analyze_cards("스테이루나", cards,
+                                              address=self.ADDRESS)
+        self.assertEqual(status, search.STATUS_AVAILABLE)
+        self.assertTrue(offers[0].verified)
+
+    def test_card_without_a_region_is_not_judged(self):
+        # 지역이 안 적힌 카드는 '모르는 것'이지 '다른 것'이 아니다
+        cards = [{"text": "스테이루나 펜션\n250,000원", "url": "https://example.com/3"}]
+        status, offers = search.analyze_cards("스테이루나", cards,
+                                              address=self.ADDRESS)
+        self.assertEqual(status, search.STATUS_AVAILABLE)
+
+    def test_region_in_the_name_is_not_mistaken_for_a_conflict(self):
+        # '라한셀렉트 경주' 처럼 이름에 지역이 든 경우
+        self.assertFalse(search.address_conflicts(
+            "경상북도 경주시 신평동", "라한셀렉트 경주\n210,000원",
+            ignore="라한셀렉트 경주"))
+
+
+class StayLunaCardTest(unittest.TestCase):
+    """실제로 사이트에서 읽어온 카드 원문으로 확인 (스테이루나 오탐 건)."""
+
+    WRONG = ("모텔\n향남 스테이13 호텔\n화성시 만세구\n9.5\n260명 평가\n대실\n"
+             "5시간\n150,000\n원\n이 가격으로 남은 객실 1개\n감성 루프탑, 최대 12")
+    RIGHT = "풀빌라\n펜션\n경주 스테이 루나\n경주시MCY파크 차량 9분\n10\n3명 평가\n다른 날짜 확인"
+    BOOKING_FAR = ("청라 스테이 22층 뷰 공항 송도 검단 김포\n"
+                   "Kojan • 15.3 miles from 스테이루헤 Stayruhe in Hongdae\nHot tub")
+
+    def test_wrong_hotel_is_rejected(self):
+        self.assertFalse(search.card_matches("스테이루나", self.WRONG))
+
+    def test_right_place_is_accepted(self):
+        self.assertTrue(search.card_matches("스테이루나", self.RIGHT))
+
+    def test_distance_line_does_not_drag_other_places_in(self):
+        # 부킹닷컴은 카드마다 '15.3 miles from OO' 로 기준 숙소를 적어둔다
+        self.assertFalse(search.card_matches("스테이루나", self.BOOKING_FAR))
+
+
+class PlacePickTest(unittest.TestCase):
+    """이름이 같은 네이버 장소가 여럿일 때 제대로 고르는지."""
+
+    CARDS = [
+        {"text": "스테이 루나\n네이버페이\n톡톡\n민박",
+         "url": "https://m.place.naver.com/place/2070273740?entry=pll"},
+        {"text": "스테이루나\n네이버페이\n톡톡\n쿠폰\n게스트하우스",
+         "url": "https://m.place.naver.com/place/2004105147?entry=pll"},
+        {"text": "스테이루나\n네이버페이\n펜션",
+         "url": "https://m.place.naver.com/place/1735150004?entry=pll"},
+    ]
+
+    def test_picks_the_one_matching_the_registered_name(self):
+        url = search.first_place_link("스테이루나", self.CARDS,
+                                      prefer="스테이루나펜션")
+        self.assertIn("1735150004", url)   # 민박도 게스트하우스도 아닌 펜션
+
+    def test_falls_back_to_the_search_word(self):
+        url = search.first_place_link("스테이루나", self.CARDS)
+        self.assertIn("accommodation", url)
+
+    def test_no_place_cards(self):
+        self.assertEqual(search.first_place_link("스테이루나", [
+            {"text": "광고", "url": "https://example.com"}]), "")

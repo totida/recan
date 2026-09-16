@@ -129,3 +129,13 @@ def default_month(today, min_date=None):
 
 def next_day(value):
     return date.fromisoformat(value) + timedelta(days=1)
+
+
+def watch_keyboard(watches, prefix="triple"):
+    """등록된 알림 중 하나를 고르는 버튼."""
+    rows = []
+    for index, watch in enumerate(watches):
+        label = f"{index + 1}. {watch.get('query', '')} · {watch.get('checkin', '')}"
+        rows.append([_button(label[:55], f"{prefix}:pick:{index}")])
+    rows.append([_button("✖️ 취소", f"{prefix}:cancel")])
+    return rows
