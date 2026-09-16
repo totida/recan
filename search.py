@@ -199,6 +199,9 @@ def similarity(query, text):
 
 def card_matches(query, text, threshold=0.6):
     """카드가 찾는 숙소인지 판단."""
+    # 부킹닷컴은 모든 카드에 '15.3 miles from 스테이루헤' 처럼 기준 숙소
+    # 이름을 적어둔다. 그 문구까지 보면 엉뚱한 카드가 전부 걸린다.
+    text = DISTANCE_RE.sub(" ", text or "")
     if match_score(query, text) >= threshold:
         return True
     ratio, longest = similarity(query, text)
@@ -524,17 +527,28 @@ def parse_place_cards(query, cards, limit=5):
     return candidates
 
 
-def first_place_link(query, cards):
-    """검색 카드 중 이름이 맞는 네이버 장소 링크를 하나 고른다."""
+def first_place_link(query, cards, prefer=""):
+    """검색 카드 중 이름이 가장 잘 맞는 네이버 장소 링크를 고른다.
+
+    '스테이루나'로 검색하면 민박·게스트하우스·펜션이 함께 나온다.
+    맨 위 것을 집으면 엉뚱한 숙소의 객실을 보게 되므로,
+    등록된 정식 이름('스테이루나펜션')과 가장 비슷한 것을 고른다.
+    """
+    best, best_score = "", -1.0
     for card in cards:
         url = card.get("url", "")
         if "naver" not in url or "place" not in url:
             continue
-        if card_matches(query, card.get("text", "")):
-            room_url = naver_room_url(url)
-            if "accommodation" in room_url:
-                return room_url
-    return ""
+        text = card.get("text", "")
+        if not card_matches(query, text):
+            continue
+        room_url = naver_room_url(url)
+        if "accommodation" not in room_url:
+            continue
+        score = similarity(prefer or query, text)[0]
+        if score > best_score:
+            best, best_score = room_url, score
+    return best
 
 
 def lookup_places(browser, query, config=None):
@@ -888,7 +902,8 @@ def _search_site(browser, watch, site):
         # 네이버는 검색 결과의 장소 링크를 따라가 객실 상태까지 확인한다.
         detail = None
         if site.get("follow_place"):
-            place_url = first_place_link(term, cards)
+            place_url = first_place_link(term, cards,
+                                         prefer=watch.get("query", ""))
             if place_url:
                 detail = naver_detail_result(browser, watch, place_url, site["name"])
                 detail.key = site["key"]

@@ -620,3 +620,49 @@ class WrongPlaceTest(unittest.TestCase):
         self.assertFalse(search.address_conflicts(
             "경상북도 경주시 신평동", "라한셀렉트 경주\n210,000원",
             ignore="라한셀렉트 경주"))
+
+
+class RealCardTest(unittest.TestCase):
+    """실제로 사이트에서 읽어온 카드 원문으로 확인 (스테이루나 오탐 건)."""
+
+    WRONG = ("모텔\n향남 스테이13 호텔\n화성시 만세구\n9.5\n260명 평가\n대실\n"
+             "5시간\n150,000\n원\n이 가격으로 남은 객실 1개\n감성 루프탑, 최대 12")
+    RIGHT = "풀빌라\n펜션\n경주 스테이 루나\n경주시MCY파크 차량 9분\n10\n3명 평가\n다른 날짜 확인"
+    BOOKING_FAR = ("청라 스테이 22층 뷰 공항 송도 검단 김포\n"
+                   "Kojan • 15.3 miles from 스테이루헤 Stayruhe in Hongdae\nHot tub")
+
+    def test_wrong_hotel_is_rejected(self):
+        self.assertFalse(search.card_matches("스테이루나", self.WRONG))
+
+    def test_right_place_is_accepted(self):
+        self.assertTrue(search.card_matches("스테이루나", self.RIGHT))
+
+    def test_distance_line_does_not_drag_other_places_in(self):
+        # 부킹닷컴은 카드마다 '15.3 miles from OO' 로 기준 숙소를 적어둔다
+        self.assertFalse(search.card_matches("스테이루나", self.BOOKING_FAR))
+
+
+class PlacePickTest(unittest.TestCase):
+    """이름이 같은 네이버 장소가 여럿일 때 제대로 고르는지."""
+
+    CARDS = [
+        {"text": "스테이 루나\n네이버페이\n톡톡\n민박",
+         "url": "https://m.place.naver.com/place/2070273740?entry=pll"},
+        {"text": "스테이루나\n네이버페이\n톡톡\n쿠폰\n게스트하우스",
+         "url": "https://m.place.naver.com/place/2004105147?entry=pll"},
+        {"text": "스테이루나\n네이버페이\n펜션",
+         "url": "https://m.place.naver.com/place/1735150004?entry=pll"},
+    ]
+
+    def test_picks_the_one_matching_the_registered_name(self):
+        url = search.first_place_link("스테이루나", self.CARDS,
+                                      prefer="스테이루나펜션")
+        self.assertIn("1735150004", url)   # 민박도 게스트하우스도 아닌 펜션
+
+    def test_falls_back_to_the_search_word(self):
+        url = search.first_place_link("스테이루나", self.CARDS)
+        self.assertIn("accommodation", url)
+
+    def test_no_place_cards(self):
+        self.assertEqual(search.first_place_link("스테이루나", [
+            {"text": "광고", "url": "https://example.com"}]), "")
