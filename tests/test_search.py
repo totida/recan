@@ -569,3 +569,54 @@ class TripleSearchWatchTest(unittest.TestCase):
                  "checkout": "2026-11-21", "guests": 2}
         results = search.search_watch(self.FakeBrowser(""), watch, sites=[])
         self.assertEqual(results, [])
+
+
+class WrongPlaceTest(unittest.TestCase):
+    """이름이 살짝 겹치는 다른 숙소를 걸러내는지 (실제로 겪은 오탐)."""
+
+    ADDRESS = "경상북도 경주시 천북면 천북남로 558-27 스테이루나"
+
+    def test_one_letter_coincidence_is_not_a_match(self):
+        # '사우나'의 '나' 한 글자 때문에 '스테이루나'로 통했었다
+        for text in ("향남 스테이13 호텔\n사우나\n150,000원",
+                     "향남 스테이13 호텔\n루프탑\n150,000원",
+                     "향남 스테이13 호텔\n150,000원\n스파,사우나 이용 가능"):
+            self.assertFalse(search.card_matches("스테이루나", text), text)
+
+    def test_real_place_still_matches(self):
+        self.assertTrue(search.card_matches(
+            "스테이루나", "스테이루나 펜션\n경주시 천북면\n250,000원"))
+
+    def test_name_inserted_in_the_middle_still_matches(self):
+        # 이름 중간에 단어가 끼어드는 경우는 계속 통해야 한다
+        self.assertTrue(search.card_matches(
+            "비토애 산청", "사천 비토애풀빌라펜션&글램핑\n460,000원"))
+
+    def test_other_city_is_dropped(self):
+        cards = [{"text": "스테이루나 호텔\n경기 화성시 향남읍\n150,000원",
+                  "url": "https://example.com/1"}]
+        status, offers = search.analyze_cards("스테이루나", cards,
+                                              address=self.ADDRESS)
+        self.assertEqual(status, search.STATUS_NONE)
+        self.assertEqual(offers, [])
+
+    def test_same_city_is_kept(self):
+        cards = [{"text": "스테이루나 펜션\n경상북도 경주시 천북면\n250,000원",
+                  "url": "https://example.com/2"}]
+        status, offers = search.analyze_cards("스테이루나", cards,
+                                              address=self.ADDRESS)
+        self.assertEqual(status, search.STATUS_AVAILABLE)
+        self.assertTrue(offers[0].verified)
+
+    def test_card_without_a_region_is_not_judged(self):
+        # 지역이 안 적힌 카드는 '모르는 것'이지 '다른 것'이 아니다
+        cards = [{"text": "스테이루나 펜션\n250,000원", "url": "https://example.com/3"}]
+        status, offers = search.analyze_cards("스테이루나", cards,
+                                              address=self.ADDRESS)
+        self.assertEqual(status, search.STATUS_AVAILABLE)
+
+    def test_region_in_the_name_is_not_mistaken_for_a_conflict(self):
+        # '라한셀렉트 경주' 처럼 이름에 지역이 든 경우
+        self.assertFalse(search.address_conflicts(
+            "경상북도 경주시 신평동", "라한셀렉트 경주\n210,000원",
+            ignore="라한셀렉트 경주"))

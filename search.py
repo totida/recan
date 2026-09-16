@@ -110,6 +110,8 @@ def match_score(query, text):
 
 SIMILARITY_THRESHOLD = 0.7
 SIMILARITY_MIN_BLOCK = 3
+# 이어진 조각이 이만큼은 돼야 근거로 친다 (한 글자 우연 방지)
+SIMILARITY_MIN_PIECE = 2
 
 # 해외 사이트는 숙소를 영문으로 적는다(부킹닷컴: '라한셀렉트 경주' → 'Lahan Select
 # Gyeongju'). 한글을 로마자로 바꿔 대조하되, 같은 도시의 다른 호텔
@@ -186,8 +188,10 @@ def similarity(query, text):
     nq, nt = normalize(query), normalize(text)
     if len(nq) < 2 or not nt:
         return 0.0, 0
+    # 한 글자가 우연히 겹치는 것은 근거로 치지 않는다.
+    # '스테이루나' 를 찾는데 카드에 '사우나' 가 있다고 해서 같은 숙소일 리 없다.
     blocks = [b for b in difflib.SequenceMatcher(None, nq, nt, autojunk=False)
-              .get_matching_blocks() if b.size]
+              .get_matching_blocks() if b.size >= SIMILARITY_MIN_PIECE]
     if not blocks:
         return 0.0, 0
     return sum(b.size for b in blocks) / len(nq), max(b.size for b in blocks)
@@ -299,6 +303,31 @@ def address_match_score(address, text, ignore=""):
     return hits / len(groups)
 
 
+def city_tokens(text, ignore=""):
+    """글에서 '경주시', '화성시', '산청군' 같은 시·군·구 이름만 뽑는다."""
+    cleaned = text or ""
+    for token in query_tokens(ignore):
+        if token:
+            cleaned = cleaned.replace(token, " ")
+    return {match.group(0).strip(" ,") for match in ADMIN_CITY_RE.finditer(cleaned + " ")}
+
+
+def address_conflicts(address, text, ignore=""):
+    """카드에 적힌 시·군·구가 등록된 주소와 아예 다른가.
+
+    이름이 비슷한 다른 지역 숙소를 거르는 마지막 안전망이다.
+    카드에 지역이 안 적혀 있으면(빈 집합) 판단하지 않는다 — 모르는 것과
+    다른 것은 다르다.
+    """
+    if not address:
+        return False
+    ours = city_tokens(address)
+    theirs = city_tokens(text, ignore=ignore)
+    if not ours or not theirs:
+        return False
+    return not (ours & theirs)
+
+
 def address_verified(score):
     """주소 검증을 통과했는가. 등록된 주소가 없으면(None) 통과로 본다."""
     return score is None or score >= ADDRESS_THRESHOLD
@@ -343,6 +372,13 @@ def analyze_cards(query, cards, search_url="", limit=3, address=None):
     ]
     if any(s is not None and s >= ADDRESS_THRESHOLD for _, s in scored):
         scored = [(c, s) for c, s in scored if s is None or s >= ADDRESS_THRESHOLD]
+
+    # 주소를 통과한 카드가 하나도 없더라도, 카드에 적힌 지역이 등록 주소와
+    # 아예 다르면 그건 같은 이름의 다른 숙소다.
+    scored = [(c, s) for c, s in scored
+              if not address_conflicts(address, c.get("text", ""), ignore=query)]
+    if not scored:
+        return STATUS_NONE, []
 
     offers, soldout, unknown = [], 0, 0
     seen = set()
