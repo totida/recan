@@ -62,7 +62,7 @@ jobs:
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           SEARCH_INTERVAL_MIN: '10'   # 항목별 검색 주기(분)
-          NOTIFY_INTERVAL_MIN: '60'   # 같은 결과 재알림 최소 간격(분)
+          NOTIFY_INTERVAL_MIN: '120'  # 빈방이 계속 열려 있을 때 다시 알리는 간격(분)
           POLL_TIMEOUT_SEC: '20'      # long polling 대기(초)
           IDLE_EXIT_SEC: '0'          # 0 = 조용해도 종료하지 않음(상시 대기)
           MAX_RUN_SEC: '19800'        # 5시간 30분 뒤 종료 → 다음 실행이 이어받음

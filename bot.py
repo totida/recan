@@ -20,7 +20,9 @@ import storage
 import telegram_api
 
 SEARCH_INTERVAL = int(os.environ.get("SEARCH_INTERVAL_MIN", "60")) * 60
-NOTIFY_INTERVAL = int(os.environ.get("NOTIFY_INTERVAL_MIN", "60")) * 60
+# 빈방이 계속 열려 있는 동안 같은 숙소를 다시 알리는 간격.
+# 처음 열린 순간은 이 간격과 상관없이 바로 알린다.
+NOTIFY_INTERVAL = int(os.environ.get("NOTIFY_INTERVAL_MIN", "120")) * 60
 MAX_WATCHES = int(os.environ.get("MAX_WATCHES", "10"))
 DEFAULT_GUESTS = 2
 MAX_GUESTS = 20
@@ -436,7 +438,6 @@ def _change_guests(chat, argument):
     watch = watches[index - 1]
     watch["guests"] = guests
     watch["force"] = True          # 바뀐 인원으로 바로 다시 검색
-    watch["last_signature"] = ""
     return (f"👤 인원을 {guests}명으로 바꿨어요.\n"
             f"🏨 {watch['query']} ({watch['checkin']} → {watch['checkout']})\n"
             "바뀐 인원으로 지금 다시 검색할게요.")
@@ -769,27 +770,25 @@ def process_updates(db, browser=None, timeout=0):
 # 주기 검색
 # --------------------------------------------------------------------------
 
-def signature_of(results):
-    return "||".join(
-        sorted(offer.signature() for r in results if r.available for offer in r.offers)
-    )
-
-
 def decide_notification(watch, results, now, forced):
-    """보낼 알림 종류를 정한다: 'report' | 'closed' | None."""
+    """보낼 알림 종류를 정한다: 'report' | 'closed' | None.
+
+    빈방이 처음 열린 순간은 바로 알린다. 그 뒤로도 계속 열려 있으면
+    NOTIFY_INTERVAL 마다 한 번만 다시 알린다. 예전에는 값이나 객실 이름이
+    조금만 달라져도 다시 알려서, 열려 있는 동안 검색할 때마다 알림이 갔다.
+    """
     available = any(r.available for r in results)
-    signature = signature_of(results)
     if forced:
-        return "report", signature, available
+        return "report", available
     if available:
-        changed = signature != watch.get("last_signature", "")
+        opened = not watch.get("was_available")
         overdue = now - watch.get("last_notified", 0) >= NOTIFY_INTERVAL
-        if changed or overdue:
-            return "report", signature, available
-        return None, signature, available
+        if opened or overdue:
+            return "report", available
+        return None, available
     if watch.get("was_available"):
-        return "closed", signature, available
-    return None, signature, available
+        return "closed", available
+    return None, available
 
 
 def _collect_due(db, now, today):
@@ -841,7 +840,7 @@ def run_due_searches(db, now=None, today=None, browser=None):
 
             watch["last_searched"] = int(now)
             watch["force"] = False
-            kind, signature, available = decide_notification(watch, results, now, forced)
+            kind, available = decide_notification(watch, results, now, forced)
 
             if kind == "report":
                 header = ("🔄 요청하신 검색 결과예요." if forced and not available
@@ -854,7 +853,6 @@ def run_due_searches(db, now=None, today=None, browser=None):
                     f"🔕 '{watch['query']}' ({watch['checkin']} → {watch['checkout']}) "
                     "방금 전까지 보이던 빈방이 모두 마감됐어요. 계속 지켜볼게요.",
                 )
-            watch["last_signature"] = signature
             watch["was_available"] = available
     finally:
         if owns_browser:
