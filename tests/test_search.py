@@ -622,7 +622,7 @@ class WrongPlaceTest(unittest.TestCase):
             ignore="라한셀렉트 경주"))
 
 
-class RealCardTest(unittest.TestCase):
+class StayLunaCardTest(unittest.TestCase):
     """실제로 사이트에서 읽어온 카드 원문으로 확인 (스테이루나 오탐 건)."""
 
     WRONG = ("모텔\n향남 스테이13 호텔\n화성시 만세구\n9.5\n260명 평가\n대실\n"
