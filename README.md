@@ -127,7 +127,7 @@ GitHub 저장소 → Settings → Secrets → Actions 에 `TELEGRAM_TOKEN` 을 �
 | 변수 | 기본값 | 설명 |
 | --- | --- | --- |
 | `SEARCH_INTERVAL_MIN` | 60 | 검색 주기(분) |
-| `NOTIFY_INTERVAL_MIN` | 60 | 같은 결과 재알림 최소 간격(분) |
+| `NOTIFY_INTERVAL_MIN` | 120 | 빈방이 계속 열려 있을 때 다시 알리는 간격(분). 처음 열린 순간은 이 값과 상관없이 바로 알립니다 |
 | `MAX_WATCHES` | 10 | 채팅방당 최대 알림 수 |
 | `POLL_TIMEOUT_SEC` | 20 | long polling 대기(초) |
 | `IDLE_EXIT_SEC` | 60 | 이만큼 조용하면 실행 종료(초). **0 이면 상시 대기** |

@@ -376,15 +376,42 @@ class SearchRunTest(unittest.TestCase):
             self.run_search(FakeBrowser(cards=cards), now=1_000_100.0)
         self.assertEqual(second.sent, [])
 
-    def test_price_change_triggers_new_notification(self):
+    def test_price_change_alone_does_not_notify_again(self):
+        # 빈방이 계속 열려 있는 동안에는 값이 달라져도 다시 알리지 않는다
         with FakeTelegram():
             self.run_search(FakeBrowser(cards=[
-                {"text": "비토애 산청\n산청군 시천면\n120,000원"}]))
+                {"text": "비토애 산청\n산청군 시천면\n120,000원"}]), now=1_000_000.0)
         self.watch["last_searched"] = 0
         with FakeTelegram() as second:
             self.run_search(FakeBrowser(cards=[
                 {"text": "비토애 산청\n산청군 시천면\n99,000원"}]), now=1_000_100.0)
-        self.assertIn("99,000원", second.text())
+        self.assertEqual(second.sent, [])
+
+    def test_notifies_again_after_the_interval(self):
+        with FakeTelegram():
+            self.run_search(FakeBrowser(cards=[
+                {"text": "비토애 산청\n산청군 시천면\n120,000원"}]), now=1_000_000.0)
+        self.watch["last_searched"] = 0
+        later = 1_000_000.0 + bot.NOTIFY_INTERVAL + 1
+        with FakeTelegram() as second:
+            self.run_search(FakeBrowser(cards=[
+                {"text": "비토애 산청\n산청군 시천면\n120,000원"}]), now=later)
+        self.assertIn("120,000원", second.text())
+
+    def test_reopening_notifies_right_away(self):
+        # 마감됐다가 다시 열리면 간격과 상관없이 바로 알린다
+        with FakeTelegram():
+            self.run_search(FakeBrowser(cards=[
+                {"text": "비토애 산청\n산청군 시천면\n120,000원"}]), now=1_000_000.0)
+        self.watch["last_searched"] = 0
+        with FakeTelegram():
+            self.run_search(FakeBrowser(cards=[
+                {"text": "비토애 산청\n산청군 시천면\n예약마감"}]), now=1_000_100.0)
+        self.watch["last_searched"] = 0
+        with FakeTelegram() as third:
+            self.run_search(FakeBrowser(cards=[
+                {"text": "비토애 산청\n산청군 시천면\n130,000원"}]), now=1_000_200.0)
+        self.assertIn("130,000원", third.text())
 
     def test_sold_out_after_available_notifies_once(self):
         with FakeTelegram():
