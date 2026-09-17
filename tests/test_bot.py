@@ -1,5 +1,6 @@
 import os
 import sys
+import time
 import unittest
 from datetime import date
 
@@ -646,3 +647,52 @@ class TripleLinkConversationTest(unittest.TestCase):
     def test_naver_link_still_registers_a_new_watch(self):
         replies = self.say("https://m.place.naver.com/accommodation/1259756405/room")
         self.assertNotIn("어느 숙소에 붙일까요", texts(replies))
+
+
+class StuckStateTest(unittest.TestCase):
+    """등록을 하다 만 뒤에 다른 숙소를 못 넣던 문제."""
+
+    def setUp(self):
+        self.db = storage.default_db()
+
+    def say(self, text, lookup=None):
+        return bot.handle_text(self.db, CHAT, text, today=TODAY, lookup=lookup)
+
+    def state(self):
+        return storage.get_chat(self.db, CHAT)["state"]
+
+    def stall_at_date_step(self):
+        self.say("케이키즈풀빌라펜션")
+        self.say("건너뛰기")
+        self.assertEqual(self.state()["step"], "await_checkin")
+
+    def test_new_name_at_date_step_starts_over(self):
+        self.stall_at_date_step()
+        replies = self.say("소노캄 경주")
+        self.assertNotIn("날짜를 이해하지 못했어요", texts(replies))
+        self.assertIn("소노캄 경주", texts(replies))
+        self.assertEqual(self.state()["query"], "소노캄 경주")
+
+    def test_real_date_still_works(self):
+        self.stall_at_date_step()
+        self.say("5/2~5/3")
+        self.assertIn(self.state()["step"], ("await_guests", "await_confirm"))
+
+    def test_gibberish_with_digits_explains_how_to_quit(self):
+        self.stall_at_date_step()
+        replies = self.say("13월 99일")
+        self.assertIn("취소", texts(replies))
+        self.assertEqual(self.state()["step"], "await_checkin")
+
+    def test_forgotten_registration_expires(self):
+        self.stall_at_date_step()
+        # 30분 넘게 손을 놓았다
+        self.state()["touched_at"] = int(time.time()) - bot.STATE_TTL - 1
+        replies = self.say("소노캄 경주")
+        self.assertNotIn("날짜를 이해하지 못했어요", texts(replies))
+        self.assertEqual(self.state()["query"], "소노캄 경주")
+
+    def test_a_live_registration_is_not_dropped(self):
+        self.stall_at_date_step()
+        self.say("5/2~5/3")
+        self.assertIsNotNone(self.state())
