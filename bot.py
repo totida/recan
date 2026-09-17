@@ -52,6 +52,9 @@ STATUS_LABEL = {
 # 숙소는 찾았는데 가격·마감 표시가 없을 때 왜 그런지 알려준다.
 UNKNOWN_NOTE = "숙소는 찾았지만 가격 표시가 없어 판정 보류 · 링크에서 확인해 주세요"
 
+# 등록을 하다 말고 이만큼 지나면, 다음 메시지는 새 요청으로 본다.
+STATE_TTL = int(os.environ.get("STATE_TTL_MIN", "30")) * 60
+
 SKIP_WORDS = ("건너뛰기", "건너뜀", "스킵", "skip", "모름", "몰라", "패스")
 NONE_WORDS = ("없음", "없어요", "없어", "직접", "직접입력", "기타")
 YES_WORDS = ("예", "네", "넹", "ㅇ", "ㅇㅇ", "응", "yes", "y", "ok", "확인",
@@ -165,7 +168,8 @@ def _ask_triple_target(chat, link):
     if len(watches) == 1:
         return _attach_triple(chat, link, 0)
 
-    chat["state"] = {"step": "await_triple_target", "triple": link}
+    chat["state"] = {"step": "await_triple_target", "triple": link,
+                     "touched_at": int(time.time())}
     lines = ["🔗 트리플 링크를 받았어요. 어느 숙소에 붙일까요?", ""]
     for index, watch in enumerate(watches, start=1):
         lines.append(f"{index}. {watch['query']} · {watch['checkin']} → {watch['checkout']}")
@@ -199,6 +203,16 @@ def _guests_in_url(url):
         if match:
             return int(match.group(1))
     return None
+
+
+def _looks_like_new_name(text):
+    """날짜로 못 읽은 글이 새 숙소 이름처럼 보이는가.
+
+    날짜 입력을 기다리는 중에 '소노캄 경주' 를 보내면 날짜로 읽으려다
+    실패한다. 숫자가 하나도 없는 두 글자 이상의 말이면 새 숙소로 본다.
+    """
+    text = (text or "").strip()
+    return len(text) >= 2 and len(text) <= 60 and not any(c.isdigit() for c in text)
 
 
 def _object_particle(word):
@@ -273,6 +287,7 @@ def _start_registration(chat, query, guests, today, url=None,
         "guests_set": bool(guests), "url": url,
         "checkin": checkin, "checkout": checkout,
         "address": "", "address_source": "",
+        "touched_at": int(time.time()),
     }
 
     if url:  # 링크를 직접 주신 경우엔 숙소가 이미 특정된다.
@@ -505,6 +520,10 @@ def handle_text(db, chat_id, text, today=None, lookup=None):
         return [reply("🔄 지금 바로 검색할게요. 잠시만 기다려 주세요!")]
 
     state = chat.get("state") or {}
+    if state and time.time() - state.get("touched_at", 0) > STATE_TTL:
+        chat["state"] = state = {}   # 하다 만 등록은 잊는다
+    elif state:
+        state["touched_at"] = int(time.time())
     step = state.get("step")
 
     # 1) 네이버 후보 선택 (버튼 대신 번호를 적어도 되게)
@@ -534,13 +553,21 @@ def handle_text(db, chat_id, text, today=None, lookup=None):
 
     # 3) 달력 대신 날짜를 직접 입력한 경우
     if step in ("await_checkin", "await_checkout"):
+        stay, problem = None, ""
         try:
             stay = dateparse.parse_stay(text, today=today)
         except dateparse.DateParseError as exc:
-            return [reply(f"⚠️ {exc}\n달력에서 날짜를 눌러주셔도 돼요.")]
+            problem = f"⚠️ {exc}"
         if stay is None:
-            return [reply("날짜를 이해하지 못했어요 😅\n"
-                          "달력 버튼을 누르시거나 '5/2~5/3'처럼 보내주세요.")]
+            if _looks_like_new_name(text):
+                # 날짜가 아니라 다른 숙소 이름을 보낸 것으로 본다.
+                chat["state"] = None
+                started = _start_registration(chat, text, None, today, lookup=lookup)
+                return [reply(f"'{state.get('query', '')}' 등록은 그만두고 "
+                              f"'{text}' 부터 다시 시작할게요.")] + started
+            return [reply((problem or "날짜를 이해하지 못했어요 😅") + "\n"
+                          "달력 버튼을 누르시거나 '5/2~5/3'처럼 보내주세요.\n"
+                          "그만두려면 '취소' 라고 보내주세요.")]
         checkin, checkout, _ = stay
         state["checkin"] = checkin.isoformat()
         state["checkout"] = checkout.isoformat()
