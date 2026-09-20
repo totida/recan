@@ -62,8 +62,21 @@ def _markup(keyboard):
     return json.dumps({"inline_keyboard": keyboard}) if keyboard else None
 
 
-def send_message(chat_id, text, preview=False, keyboard=None):
-    """긴 메시지는 자동으로 나눠 보낸다. 성공하면 마지막 message_id 를 돌려준다."""
+def _menu_markup(menu):
+    """입력창 아래에 늘 붙어 있는 메뉴 버튼."""
+    return json.dumps({
+        "keyboard": menu,
+        "resize_keyboard": True,
+        "is_persistent": True,
+    }) if menu else None
+
+
+def send_message(chat_id, text, preview=False, keyboard=None, menu=None):
+    """긴 메시지는 자동으로 나눠 보낸다. 성공하면 마지막 message_id 를 돌려준다.
+
+    keyboard 는 메시지에 붙는 버튼, menu 는 입력창 아래 고정 메뉴다.
+    텔레그램은 한 메시지에 둘을 같이 못 붙이므로 keyboard 가 우선한다.
+    """
     message_id = None
     chunks = list(_chunks(text))
     for index, chunk in enumerate(chunks):
@@ -73,8 +86,11 @@ def send_message(chat_id, text, preview=False, keyboard=None):
             "disable_web_page_preview": "false" if preview else "true",
         }
         # 키보드는 마지막 조각에만 붙인다.
-        if keyboard and index == len(chunks) - 1:
-            params["reply_markup"] = _markup(keyboard)
+        if index == len(chunks) - 1:
+            if keyboard:
+                params["reply_markup"] = _markup(keyboard)
+            elif menu:
+                params["reply_markup"] = _menu_markup(menu)
         try:
             result = _call("sendMessage", params)
             message_id = (result or {}).get("message_id")

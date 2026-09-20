@@ -63,6 +63,8 @@ NO_WORDS = ("아니오", "아니요", "아뇨", "아니", "ㄴ", "no", "n", "틀
 
 HELP_TEXT = (
     "🏨 숙소 빈방 알림봇\n\n"
+    "타이핑은 숙소 이름 한 번이면 됩니다. 나머지는 전부 버튼이에요.\n"
+    "입력창 아래 메뉴로 추가 · 목록 · 삭제 · 지금 검색을 하실 수 있어요.\n\n"
     "1️⃣ 원하는 숙소 이름을 보내주세요. (예: 비토애 산청)\n"
     "2️⃣ 네이버에서 찾은 숙소 후보를 주소와 함께 보여드릴게요. 버튼으로 고르시면 돼요.\n"
     "3️⃣ 오늘 날짜 기준 달력에서 체크인 · 체크아웃 날짜를 눌러주세요.\n"
@@ -190,6 +192,42 @@ def _attach_triple(chat, link, index, edit=False):
         "이제 이 숙소는 트리플에서도 함께 확인할게요. 바로 한 번 검색해 볼게요!",
         edit=edit,
     )]
+
+
+# 하단 메뉴 버튼을 누르면 그 글자가 그대로 온다. 명령으로 바꿔 읽는다.
+MENU_COMMANDS = {
+    "숙소 추가": "추가", "추가": "추가",
+    "목록": "목록",
+    "삭제": "삭제",
+    "지금 검색": "지금", "지금": "지금",
+    "도움말": "도움말",
+}
+
+
+def _menu_command(text):
+    """'➕ 숙소 추가' 처럼 앞에 붙은 그림글자를 떼고 명령으로 바꾼다."""
+    stripped = re.sub(r"^[^\w가-힣]+", "", text or "").strip()
+    return MENU_COMMANDS.get(stripped, stripped)
+
+
+def _ask_delete(chat):
+    """어느 알림을 지울지 버튼으로 고르게 한다."""
+    watches = chat["watches"]
+    if not watches:
+        return [reply("삭제할 알림이 없어요.")]
+    lines = ["🗑️ 어느 알림을 지울까요?", ""]
+    for index, watch in enumerate(watches, start=1):
+        lines.append(f"{index}. {watch['query']} · {watch['checkin']} → {watch['checkout']}")
+    return [reply("\n".join(lines), keyboards.delete_keyboard(watches))]
+
+
+def _delete_one(chat, index, edit=False):
+    watches = chat["watches"]
+    if not 0 <= index < len(watches):
+        return [reply("그 번호의 알림이 없어요.", edit=edit)]
+    removed = watches.pop(index)
+    return [reply(f"🗑️ 삭제했어요: {removed['query']} "
+                  f"({removed['checkin']} → {removed['checkout']})", edit=edit)]
 
 
 def _extract_url(text):
@@ -323,7 +361,8 @@ def _ask_address(chat, state, searched=False, edit=False):
         "같은 이름의 다른 숙소와 헷갈리지 않도록, 예약사이트 검색 결과와 대조하는 데 씁니다.\n\n"
         "예) 경남 산청군 시천면 지리산대로 123\n"
         "지역만 아셔도 괜찮아요. (예: 산청군 시천면)\n"
-        "주소 없이 진행하려면 '건너뛰기'라고 보내주세요.",
+        "몰라도 괜찮아요 — 아래 버튼을 누르시면 됩니다.",
+        keyboards.address_keyboard(),
         edit=edit,
     )]
 
@@ -488,7 +527,7 @@ def handle_text(db, chat_id, text, today=None, lookup=None):
     if not text:
         return []
 
-    command = text.lstrip("/").strip()
+    command = _menu_command(text.lstrip("/").strip())
     head, _, argument = command.partition(" ")
     head_lower = head.lower()
     argument = argument.strip()
@@ -497,10 +536,18 @@ def handle_text(db, chat_id, text, today=None, lookup=None):
         chat["state"] = None
         return [reply(HELP_TEXT)]
 
+    if head_lower in ("추가", "등록", "add"):
+        chat["state"] = None
+        return [reply("🏨 감시할 숙소 이름을 보내주세요.\n"
+                      "예) 비토애 산청\n\n"
+                      "이름만 보내시면 주소·날짜·인원은 버튼으로 고르시면 돼요.")]
+
     if head_lower in ("목록", "list", "리스트"):
         return [reply(format_watch_list(chat["watches"]))]
 
     if head_lower in ("삭제", "delete", "제거", "초기화"):
+        if not argument:
+            return _ask_delete(chat)
         return [reply(_handle_delete(chat, argument))]
 
     if head_lower in ("취소", "cancel"):
@@ -659,6 +706,17 @@ def handle_callback(db, chat_id, data, today=None):
     if data == keyboards.NOOP:
         return []
 
+    if action == "del":
+        if kind == "pick" and value.isdigit():
+            return _delete_one(chat, int(value), edit=True)
+        if kind == "all":
+            chat["watches"] = []
+            chat["state"] = None
+            return [reply("🗑️ 모든 알림을 삭제했어요.", edit=True)]
+        if kind == "cancel":
+            return [reply("삭제를 취소했어요.", edit=True)]
+        return []
+
     if not state:
         return [reply("진행 중인 등록이 없어요. 숙소 이름을 다시 보내주세요.")]
 
@@ -744,7 +802,8 @@ def _send_replies(chat_id, replies, message_id=None):
             if telegram_api.edit_message(chat_id, message_id, item["text"],
                                          item.get("keyboard")):
                 continue
-        telegram_api.send_message(chat_id, item["text"], keyboard=item.get("keyboard"))
+        telegram_api.send_message(chat_id, item["text"], keyboard=item.get("keyboard"),
+                                  menu=keyboards.menu_keyboard())
 
 
 def process_updates(db, browser=None, timeout=0):

@@ -139,3 +139,34 @@ def watch_keyboard(watches, prefix="triple"):
         rows.append([_button(label[:55], f"{prefix}:pick:{index}")])
     rows.append([_button("✖️ 취소", f"{prefix}:cancel")])
     return rows
+
+
+# 입력창 아래에 늘 붙어 있는 메뉴. 누르면 그 글자가 그대로 전송된다.
+MENU = [
+    ["➕ 숙소 추가", "📋 목록"],
+    ["➖ 삭제", "🔍 지금 검색"],
+    ["❓ 도움말"],
+]
+
+
+def menu_keyboard():
+    return [list(row) for row in MENU]
+
+
+def delete_keyboard(watches):
+    """어느 알림을 지울지 고르는 버튼."""
+    rows = []
+    for index, watch in enumerate(watches):
+        label = f"{index + 1}. {watch.get('query', '')} · {watch.get('checkin', '')}"
+        rows.append([_button(label[:55], f"del:pick:{index}")])
+    rows.append([_button("🗑️ 전체 삭제", "del:all")])
+    rows.append([_button("✖️ 취소", "del:cancel")])
+    return rows
+
+
+def address_keyboard():
+    """주소를 모를 때 그냥 넘어갈 수 있게."""
+    return [
+        [_button("⏭️ 주소 없이 진행", "place:skip")],
+        [_button("✖️ 취소", "place:cancel")],
+    ]
