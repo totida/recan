@@ -916,7 +916,7 @@ def _collect_due(db, now, today):
     return due, notices
 
 
-def run_due_searches(db, now=None, today=None, browser=None):
+def run_due_searches(db, now=None, today=None, browser=None, between=None):
     now = now or time.time()
     today = today or dateparse.today_kst()
     due, notices = _collect_due(db, now, today)
@@ -935,7 +935,8 @@ def run_due_searches(db, now=None, today=None, browser=None):
             forced = bool(watch.get("force"))
             print(f"🔎 검색: {watch['query']} {watch['checkin']}~{watch['checkout']} "
                   f"(chat {mask(chat_id)})")
-            results = search.search_watch(browser, watch, sites)
+            results = search.search_watch(browser, watch, sites,
+                                          after_site=between)
             for result in results:
                 print(f"   - {result.name}: {result.status} "
                       f"({len(result.offers)}건) {result.note}")
@@ -969,21 +970,27 @@ def main():
     print(f"📂 감시 중인 숙소 {watches}건을 불러왔습니다.")
     browser = search.Browser()  # 크롬은 실제로 필요할 때만 뜬다
     started = time.time()
-    last_activity = None
+    seen = {"activity": None}
     timeout = POLL_TIMEOUT if ALWAYS_ON else 0  # 상시 대기면 처음부터 기다린다
     if ALWAYS_ON:
         print(f"🟢 상시 대기 모드 (최대 {MAX_RUN // 60}분, 검색 주기 "
               f"{SEARCH_INTERVAL // 60}분)")
     try:
+        def pump():
+            """검색이 도는 중에도 텔레그램 입력을 계속 받아준다."""
+            if process_updates(db, browser, timeout=0):
+                seen["activity"] = time.time()
+
         while True:
             handled = process_updates(db, browser, timeout=timeout)
             if handled:
-                last_activity = time.time()
-            searched = run_due_searches(db, browser=browser)
+                seen["activity"] = time.time()
+            searched = run_due_searches(db, browser=browser, between=pump)
             storage.save_db(db)
             storage.persist()
 
             now = time.time()
+            last_activity = seen["activity"]
             idle = last_activity is None or now - last_activity >= BROWSER_IDLE
             if searched and ALWAYS_ON and idle:
                 browser.quit()  # 오래 켜둘 때 크롬이 메모리를 물고 있지 않도록

@@ -871,3 +871,40 @@ class SearchingNoticeTest(unittest.TestCase):
         self.assertIn("찾는 중", sent[0])          # 먼저 안내가 가고
         self.assertIn("비토애 산청", sent[0])
         self.assertIn("어느 숙소인가요", "\n".join(sent[1:]))   # 그 다음 후보
+
+
+class StayAwakeDuringSearchTest(unittest.TestCase):
+    """검색이 도는 동안에도 텔레그램 입력을 받는지."""
+
+    class CountingBrowser:
+        def collect_cards(self, url, selectors, wait=6, scrolls=2, retry_wait=5,
+                          ready=None):
+            return [{"text": "비토애 산청\n산청군 시천면\n120,000원", "url": "https://x/1"}]
+
+        def body_text(self, limit=2000):
+            return ""
+
+        def quit(self):
+            pass
+
+    def setUp(self):
+        self.db = storage.default_db()
+        chat = storage.get_chat(self.db, CHAT)
+        chat["watches"] = [storage.new_watch("비토애 산청", "2026-05-02", "2026-05-03",
+                                             2, address="경남 산청군 시천면")]
+        self.watch = chat["watches"][0]
+        self.watch["force"] = True
+
+    def test_called_between_sites(self):
+        calls = []
+        with FakeTelegram():
+            bot.run_due_searches(self.db, browser=self.CountingBrowser(),
+                                 today=TODAY, between=lambda: calls.append(1))
+        sites = len(search.load_sites())
+        self.assertEqual(len(calls), sites)   # 사이트마다 한 번씩
+
+    def test_works_without_the_hook(self):
+        with FakeTelegram() as fake:
+            bot.run_due_searches(self.db, browser=self.CountingBrowser(),
+                                 today=TODAY)
+        self.assertIn("비토애 산청", fake.text())
