@@ -563,6 +563,7 @@ def lookup_places(browser, query, config=None):
                 config.get("card_selectors"),
                 config.get("wait", 5),
                 config.get("scrolls", 1),
+                ready=lambda found: bool(parse_place_cards(query, found, limit)),
             )
         except Exception as exc:  # noqa: BLE001
             print(f"⚠️ 주소 검색 실패({url}): {str(exc).splitlines()[0][:100]}")
@@ -617,24 +618,47 @@ class Browser:
         # 설정한 선택자가 모두 빗나가면 링크 전체를 훑는다.
         return _elements_to_cards(self.driver.find_elements(By.CSS_SELECTOR, "a"))
 
-    def collect_cards(self, url, selectors, wait=6, scrolls=2, retry_wait=5):
-        """페이지를 열고 검색결과 카드 후보를 (텍스트, 링크)로 수집."""
+    def _watch_cards(self, selectors, done, timeout, poll=0.4):
+        """찾던 것이 나오면 곧바로 돌려준다. 안 나오면 timeout 까지만 기다린다.
+
+        예전에는 정해진 초를 무조건 다 세고 봤다. 화면이 1초 만에 다 떠도
+        7초를 기다리느라 숙소 이름을 넣고 한참 멍하니 있어야 했다.
+        """
         import time as _time
 
+        deadline = _time.time() + timeout
+        cards = self._pick_cards(selectors)
+        while not done(cards) and _time.time() < deadline:
+            _time.sleep(poll)
+            cards = self._pick_cards(selectors)
+        return cards
+
+    def collect_cards(self, url, selectors, wait=6, scrolls=2, retry_wait=5,
+                      ready=None):
+        """페이지를 열고 검색결과 카드 후보를 (텍스트, 링크)로 수집.
+
+        ready(cards) 가 참이 되는 순간 기다리기를 멈춘다. 넘기지 않으면
+        카드가 하나라도 잡히는 것을 신호로 본다.
+        """
         driver = self.driver
         driver.get(url)
-        _time.sleep(wait)
+
+        def done(cards):
+            return bool(ready(cards)) if ready else bool(cards)
+
+        cards = self._watch_cards(selectors, done, wait)
+        if done(cards):
+            return cards
+
         for _ in range(scrolls):
             driver.execute_script("window.scrollBy(0, document.body.scrollHeight/2);")
-            _time.sleep(2)
+            cards = self._watch_cards(selectors, done, 2)
+            if done(cards):
+                return cards
 
-        cards = self._pick_cards(selectors)
-        if not cards and retry_wait:
-            # 늦게 그려지는 화면(SPA)을 위해 한 번 더 기다렸다 본다.
-            _time.sleep(retry_wait)
-            driver.execute_script("window.scrollBy(0, document.body.scrollHeight/2);")
-            _time.sleep(2)
-            cards = self._pick_cards(selectors)
+        if retry_wait:
+            # 늦게 그려지는 화면(SPA)을 위해 한 번 더 기다려 본다.
+            cards = self._watch_cards(selectors, done, retry_wait)
         return cards
 
     def body_text(self, limit=2000):
@@ -892,8 +916,12 @@ def _search_site(browser, watch, site):
                                 note=f"URL 설정 오류: {exc}")
             continue
         try:
-            cards = browser.collect_cards(url, site.get("card_selectors"),
-                                          site.get("wait", 6), site.get("scrolls", 2))
+            cards = browser.collect_cards(
+                url, site.get("card_selectors"),
+                site.get("wait", 6), site.get("scrolls", 2),
+                ready=lambda found: any(card_matches(term, c.get("text", ""))
+                                        for c in found),
+            )
         except Exception as exc:  # noqa: BLE001
             result = SiteResult(site["key"], site["name"], STATUS_ERROR, url,
                                 note=str(exc).splitlines()[0][:120])

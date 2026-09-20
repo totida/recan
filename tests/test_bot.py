@@ -76,7 +76,7 @@ class FakeBrowser:
         self.visited = []
         self.quit_called = False
 
-    def collect_cards(self, url, selectors, wait=6, scrolls=2):
+    def collect_cards(self, url, selectors, wait=6, scrolls=2, retry_wait=5, ready=None):
         self.visited.append(url)
         return self.cards
 
@@ -833,3 +833,41 @@ class MenuAttachedTest(unittest.TestCase):
         import telegram_api as api
         self.assertIsNone(api._menu_markup(None))
         self.assertIn("inline_keyboard", json.loads(api._markup([[{"text": "x", "callback_data": "y"}]])))
+
+
+class SearchingNoticeTest(unittest.TestCase):
+    """네이버를 훑는 동안 '찾는 중'이라고 먼저 알리는지."""
+
+    class SlowBrowser:
+        """후보를 돌려주기 전에 시간이 걸리는 척한다."""
+
+        def collect_cards(self, url, selectors, wait=6, scrolls=2, retry_wait=5,
+                          ready=None):
+            return [{"text": "비토애 산청\n경남 산청군 시천면 지리산대로 123",
+                     "url": "https://m.place.naver.com/accommodation/1/room"}]
+
+        def body_text(self, limit=2000):
+            return ""
+
+        def quit(self):
+            pass
+
+    def test_notice_comes_before_the_candidates(self):
+        db = storage.default_db()
+        update = {"update_id": 1,
+                  "message": {"text": "비토애 산청", "chat": {"id": int(CHAT)}}}
+
+        with FakeTelegram() as fake:
+            original = telegram_api.get_updates
+            telegram_api.get_updates = bot.telegram_api.get_updates = (
+                lambda offset, timeout=0, limit=50: [update])
+            try:
+                bot.process_updates(db, browser=self.SlowBrowser(), timeout=0)
+            finally:
+                telegram_api.get_updates = bot.telegram_api.get_updates = original
+
+        sent = [text for _, text in fake.sent]
+        self.assertTrue(sent, "아무 메시지도 안 갔다")
+        self.assertIn("찾는 중", sent[0])          # 먼저 안내가 가고
+        self.assertIn("비토애 산청", sent[0])
+        self.assertIn("어느 숙소인가요", "\n".join(sent[1:]))   # 그 다음 후보
