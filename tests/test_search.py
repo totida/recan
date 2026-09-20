@@ -385,7 +385,7 @@ class PlaceLookupTest(unittest.TestCase):
             def __init__(self):
                 self.visited = []
 
-            def collect_cards(self, url, selectors, wait=5, scrolls=1):
+            def collect_cards(self, url, selectors, wait=5, scrolls=1, retry_wait=5, ready=None):
                 self.visited.append(url)
                 return [] if len(self.visited) == 1 else PlaceLookupTest.CARDS
 
@@ -666,3 +666,58 @@ class PlacePickTest(unittest.TestCase):
     def test_no_place_cards(self):
         self.assertEqual(search.first_place_link("스테이루나", [
             {"text": "광고", "url": "https://example.com"}]), "")
+
+
+class WaitNoLongerThanNeededTest(unittest.TestCase):
+    """화면이 뜨면 곧바로 넘어가는지 (숙소 입력이 느리던 문제)."""
+
+    class FakeDriver:
+        def __init__(self):
+            self.opened = []
+
+        def get(self, url):
+            self.opened.append(url)
+
+        def execute_script(self, script):
+            pass
+
+    def make_browser(self, sequence):
+        """_pick_cards 가 sequence 를 차례로 돌려주는 가짜 브라우저."""
+        browser = search.Browser()
+        browser._driver = self.FakeDriver()
+        state = {"n": 0}
+
+        def pick(selectors):
+            index = min(state["n"], len(sequence) - 1)
+            state["n"] += 1
+            return sequence[index]
+
+        browser._pick_cards = pick
+        return browser
+
+    def test_returns_as_soon_as_cards_appear(self):
+        import time as _time
+        cards = [{"text": "비토애 산청\n120,000원", "url": "https://x/1"}]
+        browser = self.make_browser([[], [], cards])
+        start = _time.time()
+        got = browser.collect_cards("https://x", ["li"], wait=30, scrolls=3)
+        self.assertEqual(got, cards)
+        self.assertLess(_time.time() - start, 5)   # 30초를 다 세지 않는다
+
+    def test_ready_decides_when_to_stop(self):
+        junk = [{"text": "광고입니다", "url": ""}]
+        real = [{"text": "비토애 산청\n120,000원", "url": "https://x/1"}]
+        browser = self.make_browser([junk, junk, real])
+        got = browser.collect_cards(
+            "https://x", ["li"], wait=30, scrolls=0,
+            ready=lambda cards: any("비토애" in c["text"] for c in cards))
+        self.assertEqual(got, real)
+
+    def test_gives_up_when_nothing_shows(self):
+        import time as _time
+        browser = self.make_browser([[]])
+        start = _time.time()
+        got = browser.collect_cards("https://x", ["li"], wait=1, scrolls=1,
+                                    retry_wait=1)
+        self.assertEqual(got, [])
+        self.assertLess(_time.time() - start, 8)

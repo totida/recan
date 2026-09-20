@@ -52,6 +52,10 @@ STATUS_LABEL = {
 # 숙소는 찾았는데 가격·마감 표시가 없을 때 왜 그런지 알려준다.
 UNKNOWN_NOTE = "숙소는 찾았지만 가격 표시가 없어 판정 보류 · 링크에서 확인해 주세요"
 
+# 대화가 끊긴 지 이만큼 지나야 크롬을 내린다. 방금 대화하던 중이면 켜둔 채로
+# 두어, 숙소 이름을 넣었을 때 크롬이 새로 뜨는 시간을 기다리지 않게 한다.
+BROWSER_IDLE = int(os.environ.get("BROWSER_IDLE_SEC", "300"))
+
 # 등록을 하다 말고 이만큼 지나면, 다음 메시지는 새 요청으로 본다.
 STATE_TTL = int(os.environ.get("STATE_TTL_MIN", "30")) * 60
 
@@ -818,7 +822,18 @@ def process_updates(db, browser=None, timeout=0):
     if updates:
         print(f"📨 새 입력 {len(updates)}건")
 
-    lookup = (lambda query: search.lookup_places(browser, query)) if browser else None
+    def make_lookup(chat_id):
+        """네이버에서 후보를 찾기 전에 '찾는 중'이라고 먼저 알린다.
+
+        크롬을 띄워 네이버를 훑는 동안 몇 초가 걸린다. 그동안 아무 말이
+        없으면 먹통처럼 보인다.
+        """
+        def lookup(query):
+            telegram_api.send_message(
+                chat_id, f"🔎 '{query}' 찾는 중이에요… 잠시만요!")
+            return search.lookup_places(browser, query)
+        return lookup
+
     for update in updates:
         db["last_update_id"] = max(db.get("last_update_id", 0), update["update_id"])
 
@@ -843,7 +858,8 @@ def process_updates(db, browser=None, timeout=0):
         if not chat_id or not text:
             continue
         try:
-            replies = handle_text(db, chat_id, text, lookup=lookup)
+            replies = handle_text(db, chat_id, text,
+                                  lookup=make_lookup(chat_id) if browser else None)
         except Exception as exc:  # noqa: BLE001 - 한 명의 오류가 전체를 멈추지 않도록
             print(f"⚠️ 메시지 처리 오류(chat {mask(chat_id)}): {exc}")
             replies = [reply("처리 중 문제가 생겼어요 😢 다시 한 번 보내주시겠어요?")]
@@ -966,10 +982,12 @@ def main():
             searched = run_due_searches(db, browser=browser)
             storage.save_db(db)
             storage.persist()
-            if searched and ALWAYS_ON:
-                browser.quit()  # 오래 켜둘 때 크롬이 메모리를 물고 있지 않도록
 
             now = time.time()
+            idle = last_activity is None or now - last_activity >= BROWSER_IDLE
+            if searched and ALWAYS_ON and idle:
+                browser.quit()  # 오래 켜둘 때 크롬이 메모리를 물고 있지 않도록
+
             if now - started >= MAX_RUN:
                 break
             if not ALWAYS_ON:
