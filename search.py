@@ -956,21 +956,34 @@ def _search_site(browser, watch, site):
     return result
 
 
-def search_watch(browser, watch, sites=None):
-    """감시 항목 하나에 대해 모든 사이트를 검색."""
+def search_watch(browser, watch, sites=None, after_site=None):
+    """감시 항목 하나에 대해 모든 사이트를 검색.
+
+    after_site 를 주면 사이트 하나를 끝낼 때마다 불러준다. 검색 한 바퀴가
+    길어도 그 사이에 텔레그램 입력을 처리해 봇이 먹통으로 보이지 않게 한다.
+    사이트 사이에서만 부르므로, 다음 사이트는 어차피 페이지를 새로 열어
+    브라우저를 같이 써도 문제가 없다.
+    """
     sites = sites if sites is not None else load_sites()
     results = []
+
+    def done():
+        if after_site:
+            after_site()
 
     registered = watch.get("url") or ""
     if "naver" in registered:
         results.append(naver_detail_result(browser, watch, registered,
                                            "네이버 예약(등록 링크)"))
+        done()
 
     if watch.get("triple"):
         results.append(triple_detail_result(browser, watch, watch["triple"]))
+        done()
 
     for site in sites:
         if "naver" in registered and site["key"] == "naver":
             continue  # 상세 링크로 이미 확인함
         results.append(_search_site(browser, watch, site))
+        done()
     return results
