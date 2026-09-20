@@ -39,13 +39,15 @@ class FakeTelegram:
 
     def __init__(self):
         self.sent = []
+        self.menus = []
 
     def __enter__(self):
         self._send = telegram_api.send_message
         self._edit = telegram_api.edit_message
 
-        def send(chat_id, text, preview=False, keyboard=None):
+        def send(chat_id, text, preview=False, keyboard=None, menu=None):
             self.sent.append((str(chat_id), text))
+            self.menus.append(menu)
             return 42
 
         def edit(chat_id, message_id, text, keyboard=None):
@@ -696,3 +698,138 @@ class StuckStateTest(unittest.TestCase):
         self.stall_at_date_step()
         self.say("5/2~5/3")
         self.assertIsNotNone(self.state())
+
+
+class MenuButtonTest(unittest.TestCase):
+    """입력창 아래 고정 메뉴 버튼."""
+
+    def setUp(self):
+        self.db = storage.default_db()
+
+    def say(self, text, lookup=None):
+        return bot.handle_text(self.db, CHAT, text, today=TODAY, lookup=lookup)
+
+    def tap(self, data):
+        return bot.handle_callback(self.db, CHAT, data, today=TODAY)
+
+    def watches(self):
+        return storage.get_chat(self.db, CHAT)["watches"]
+
+    def register(self, line):
+        self.say(line)
+        self.tap("place:skip")
+        self.say("5/2~5/3")
+        if storage.get_chat(self.db, CHAT)["state"]["step"] == "await_guests":
+            self.tap("guests:pick:2")
+        return self.say("예")
+
+    def test_button_text_becomes_a_command(self):
+        self.assertIn("숙소 이름을 보내주세요", texts(self.say("➕ 숙소 추가")))
+        self.assertIn("등록된 알림이 없어요", texts(self.say("📋 목록")))
+        self.assertIn("삭제할 알림이 없어요", texts(self.say("➖ 삭제")))
+        self.assertIn("등록된 알림이 없어요", texts(self.say("🔍 지금 검색")))
+        self.assertIn("숙소 빈방 알림봇", texts(self.say("❓ 도움말")))
+
+    def test_plain_words_still_work(self):
+        self.assertIn("등록된 알림이 없어요", texts(self.say("목록")))
+
+    def test_delete_button_asks_which_one(self):
+        self.register("비토애 산청")
+        replies = self.say("➖ 삭제")
+        self.assertIn("어느 알림을 지울까요", texts(replies))
+        self.assertIn("del:pick:0", buttons(replies))
+        self.assertIn("del:all", buttons(replies))
+        self.assertEqual(len(self.watches()), 1)   # 아직 안 지웠다
+
+    def test_bare_delete_no_longer_wipes_everything(self):
+        self.register("비토애 산청")
+        self.say("삭제")
+        self.assertEqual(len(self.watches()), 1)
+
+    def test_delete_one_by_button(self):
+        self.register("비토애 산청")
+        self.say("➖ 삭제")
+        self.tap("del:pick:0")
+        self.assertEqual(self.watches(), [])
+
+    def test_delete_all_by_button(self):
+        self.register("비토애 산청")
+        self.say("➖ 삭제")
+        self.tap("del:all")
+        self.assertEqual(self.watches(), [])
+
+    def test_delete_cancel_keeps_them(self):
+        self.register("비토애 산청")
+        self.say("➖ 삭제")
+        self.tap("del:cancel")
+        self.assertEqual(len(self.watches()), 1)
+
+    def test_delete_with_a_number_still_works(self):
+        self.register("비토애 산청")
+        self.say("삭제 1")
+        self.assertEqual(self.watches(), [])
+
+    def test_delete_all_by_word_still_works(self):
+        self.register("비토애 산청")
+        self.say("삭제 전체")
+        self.assertEqual(self.watches(), [])
+
+
+class NoTypingTest(unittest.TestCase):
+    """숙소 이름 말고는 타이핑 없이 끝나는지."""
+
+    def setUp(self):
+        self.db = storage.default_db()
+
+    def say(self, text, lookup=None):
+        return bot.handle_text(self.db, CHAT, text, today=TODAY, lookup=lookup)
+
+    def tap(self, data):
+        return bot.handle_callback(self.db, CHAT, data, today=TODAY)
+
+    def state(self):
+        return storage.get_chat(self.db, CHAT)["state"]
+
+    def test_address_step_has_buttons(self):
+        replies = self.say("비토애 산청")
+        self.assertEqual(self.state()["step"], "await_address")
+        self.assertIn("place:skip", buttons(replies))
+        self.assertIn("place:cancel", buttons(replies))
+
+    def test_name_then_only_buttons(self):
+        self.say("비토애 산청")            # 타이핑은 여기 한 번뿐
+        self.tap("place:skip")            # 주소 건너뛰기
+        self.tap("cal:in:2026-05-02")     # 체크인
+        self.tap("cal:out:2026-05-03")    # 체크아웃
+        self.tap("guests:pick:4")         # 인원
+        self.tap("confirm:yes")
+        watches = storage.get_chat(self.db, CHAT)["watches"]
+        self.assertEqual(len(watches), 1)
+        self.assertEqual(watches[0]["checkin"], "2026-05-02")
+        self.assertEqual(watches[0]["checkout"], "2026-05-03")
+        self.assertEqual(watches[0]["guests"], 4)
+
+
+class MenuAttachedTest(unittest.TestCase):
+    """보내는 메시지에 하단 메뉴가 실제로 붙는지."""
+
+    def test_menu_rides_along(self):
+        db = storage.default_db()
+        with FakeTelegram() as fake:
+            bot._send_replies(CHAT, [bot.reply("안녕하세요")])
+        self.assertEqual(fake.menus[-1], keyboards.menu_keyboard())
+
+    def test_telegram_builds_a_persistent_keyboard(self):
+        import json
+        import telegram_api as api
+        markup = json.loads(api._menu_markup(keyboards.menu_keyboard()))
+        self.assertTrue(markup["is_persistent"])
+        self.assertTrue(markup["resize_keyboard"])
+        self.assertIn("➕ 숙소 추가", markup["keyboard"][0])
+
+    def test_inline_buttons_win_over_the_menu(self):
+        # 한 메시지에 둘 다는 못 붙인다 — 달력 같은 버튼이 우선
+        import json
+        import telegram_api as api
+        self.assertIsNone(api._menu_markup(None))
+        self.assertIn("inline_keyboard", json.loads(api._markup([[{"text": "x", "callback_data": "y"}]])))
