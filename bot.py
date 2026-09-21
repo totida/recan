@@ -1001,6 +1001,17 @@ def main():
     db = storage.load_db()
     watches = sum(len(chat.get("watches", [])) for chat in db["chats"].values())
     print(f"📂 감시 중인 숙소 {watches}건을 불러왔습니다.")
+
+    # 주인을 실행할 때마다 찍어둔다. OWNER_CHAT_ID 를 잘못 넣으면 알림이
+    # 엉뚱한 곳으로 가는데, 조용히 그러면 알아챌 길이 없다.
+    owner = storage.ensure_owner(db)
+    if not owner:
+        print("👑 주인이 아직 없습니다. 처음 말을 건 사람이 주인이 됩니다.")
+    elif owner in db["chats"]:
+        print(f"👑 주인: {mask(owner)}")
+    else:
+        print(f"🚨 주인({mask(owner)})이 이 봇과 대화한 적이 없습니다. "
+              "OWNER_CHAT_ID 를 잘못 넣지 않았는지 확인해 주세요.")
     browser = search.Browser()  # 크롬은 실제로 필요할 때만 뜬다
     started = time.time()
     seen = {"activity": None}
