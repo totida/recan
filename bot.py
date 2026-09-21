@@ -86,6 +86,7 @@ HELP_TEXT = (
     "  인원 2 4 — 2번 알림을 4명으로 변경\n"
     "  지금 — 기다리지 않고 바로 검색\n"
     "  취소 — 입력 중이던 등록 취소\n"
+    "  내아이디 — 이 대화의 채팅 ID 보기\n"
     "  도움말 — 이 안내 다시 보기"
 )
 
@@ -540,6 +541,14 @@ def handle_text(db, chat_id, text, today=None, lookup=None):
         chat["state"] = None
         return [reply(HELP_TEXT)]
 
+    if head_lower in ("내아이디", "아이디", "내번호", "whoami", "id"):
+        owner = storage.ensure_owner(db)
+        role = "주인이에요 👑" if str(chat_id) == str(owner) else "주인이 아니에요"
+        return [reply(f"이 대화의 채팅 ID 는 {chat_id} 입니다.\n"
+                      f"당신은 이 봇의 {role}\n\n"
+                      "이 번호를 OWNER_CHAT_ID 비밀값으로 넣어 두면 "
+                      "주인이 영영 바뀌지 않아요.")]
+
     if head_lower in ("추가", "등록", "add"):
         chat["state"] = None
         return [reply("🏨 감시할 숙소 이름을 보내주세요.\n"
@@ -810,6 +819,28 @@ def _send_replies(chat_id, replies, message_id=None):
                                   menu=keyboards.menu_keyboard())
 
 
+def greet_owner_about(db, chat_id):
+    """처음 보는 사람이 봇을 쓰기 시작하면 주인에게 알린다.
+
+    봇 주소를 아는 사람은 누구나 쓸 수 있다. 남이 쓰기 시작하면 검색도
+    그만큼 늘어나므로, 주인이 알고는 있어야 한다.
+    """
+    chat_id = str(chat_id)
+    owner = storage.ensure_owner(db)
+    if not owner:
+        db["owner"] = chat_id     # 처음 말을 건 사람이 주인이 된다
+        return
+    if chat_id == owner or chat_id in db.get("chats", {}):
+        return
+    people = len(db.get("chats", {}))
+    telegram_api.send_message(
+        owner,
+        f"👤 새로운 사람이 봇을 쓰기 시작했어요. (chat {mask(chat_id)})\n"
+        f"지금까지 이 봇을 쓴 사람은 모두 {people + 1}명이에요.\n"
+        "나만 쓰게 막고 싶으시면 알려주세요.",
+    )
+
+
 def process_updates(db, browser=None, timeout=0):
     """새 메시지·버튼 입력을 처리하고 처리 건수를 돌려준다."""
     offset = db.get("last_update_id", 0) + 1
@@ -844,6 +875,7 @@ def process_updates(db, browser=None, timeout=0):
             telegram_api.answer_callback(callback.get("id", ""))
             if not chat_id:
                 continue
+            greet_owner_about(db, chat_id)
             try:
                 replies = handle_callback(db, chat_id, callback.get("data", ""))
             except Exception as exc:  # noqa: BLE001
@@ -857,6 +889,7 @@ def process_updates(db, browser=None, timeout=0):
         chat_id = str((message.get("chat") or {}).get("id", ""))
         if not chat_id or not text:
             continue
+        greet_owner_about(db, chat_id)
         try:
             replies = handle_text(db, chat_id, text,
                                   lookup=make_lookup(chat_id) if browser else None)

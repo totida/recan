@@ -1,5 +1,6 @@
 import os
 import sys
+import json
 import time
 import unittest
 from datetime import date
@@ -908,3 +909,157 @@ class StayAwakeDuringSearchTest(unittest.TestCase):
             bot.run_due_searches(self.db, browser=self.CountingBrowser(),
                                  today=TODAY)
         self.assertIn("비토애 산청", fake.text())
+
+
+class NewPersonNoticeTest(unittest.TestCase):
+    """남이 봇을 쓰기 시작하면 주인에게 알리는지."""
+
+    OTHER = "99887766"
+
+    def setUp(self):
+        self.db = storage.default_db()
+        self.db["owner"] = CHAT
+        storage.get_chat(self.db, CHAT)   # 주인은 이미 쓰고 있다
+
+    def feed(self, chat_id, text="안녕"):
+        update = {"update_id": 1,
+                  "message": {"text": text, "chat": {"id": int(chat_id)}}}
+        original = telegram_api.get_updates
+        telegram_api.get_updates = bot.telegram_api.get_updates = (
+            lambda offset, timeout=0, limit=50: [update])
+        try:
+            bot.process_updates(self.db, browser=None, timeout=0)
+        finally:
+            telegram_api.get_updates = bot.telegram_api.get_updates = original
+
+    def test_owner_hears_about_a_stranger(self):
+        with FakeTelegram() as fake:
+            self.feed(self.OTHER)
+        notices = [text for chat, text in fake.sent
+                   if chat == CHAT and "새로운 사람" in text]
+        self.assertEqual(len(notices), 1)
+        self.assertIn("…7766", notices[0])          # 가린 채팅 ID
+        self.assertNotIn(self.OTHER, notices[0])    # 전체 ID 는 안 보낸다
+
+    def test_only_once_per_person(self):
+        with FakeTelegram() as fake:
+            self.feed(self.OTHER)
+            self.feed(self.OTHER, "목록")
+        notices = [t for c, t in fake.sent if c == CHAT and "새로운 사람" in t]
+        self.assertEqual(len(notices), 1)
+
+    def test_owner_is_not_announced(self):
+        with FakeTelegram() as fake:
+            self.feed(CHAT)
+        self.assertEqual([t for c, t in fake.sent if "새로운 사람" in t], [])
+
+    def test_first_person_becomes_the_owner(self):
+        db = storage.default_db()
+        self.db = db
+        with FakeTelegram() as fake:
+            self.feed(self.OTHER)
+        self.assertEqual(db["owner"], self.OTHER)
+        self.assertEqual([t for c, t in fake.sent if "새로운 사람" in t], [])
+
+
+class OwnerGuessTest(unittest.TestCase):
+    """이미 쓰고 있던 사람을 주인으로 이어받는지."""
+
+    def test_picks_the_one_with_the_most_watches(self):
+        db = storage.default_db()
+        busy = storage.get_chat(db, "111")
+        busy["watches"] = [storage.new_watch("가", "2026-05-02", "2026-05-03"),
+                           storage.new_watch("나", "2026-05-02", "2026-05-03")]
+        storage.get_chat(db, "222")
+        self.assertEqual(storage.ensure_owner(db), "111")
+
+    def test_keeps_an_owner_once_set(self):
+        db = storage.default_db()
+        db["owner"] = "333"
+        storage.get_chat(db, "111")["watches"] = [
+            storage.new_watch("가", "2026-05-02", "2026-05-03")]
+        self.assertEqual(storage.ensure_owner(db), "333")
+
+    def test_no_owner_when_nobody_has_used_it(self):
+        self.assertEqual(storage.ensure_owner(storage.default_db()), "")
+
+
+class OwnerNeverChangesTest(unittest.TestCase):
+    """주인은 한 번 정해지면 바뀌지 않는다."""
+
+    def test_someone_else_with_more_watches_does_not_take_over(self):
+        db = storage.default_db()
+        db["owner"] = "111"
+        storage.get_chat(db, "111")            # 주인은 숙소가 하나도 없고
+        greedy = storage.get_chat(db, "222")   # 남이 잔뜩 등록해도
+        greedy["watches"] = [storage.new_watch(str(n), "2026-05-02", "2026-05-03")
+                             for n in range(5)]
+        self.assertEqual(storage.ensure_owner(db), "111")
+
+    def test_owner_survives_losing_all_watches(self):
+        db = storage.default_db()
+        db["owner"] = "111"
+        storage.get_chat(db, "111")["watches"] = []
+        self.assertEqual(storage.ensure_owner(db), "111")
+
+    def test_owner_survives_a_reload(self):
+        db = storage.default_db()
+        db["owner"] = "111"
+        storage.get_chat(db, "222")["watches"] = [
+            storage.new_watch("가", "2026-05-02", "2026-05-03")]
+        again = storage.migrate(json.loads(json.dumps(db)))
+        self.assertEqual(again["owner"], "111")
+
+    def test_setting_wins_over_everything(self):
+        original = storage.OWNER_CHAT_ID
+        storage.OWNER_CHAT_ID = "999"
+        try:
+            db = storage.default_db()
+            db["owner"] = "111"
+            self.assertEqual(storage.ensure_owner(db), "999")
+            self.assertEqual(db["owner"], "999")
+        finally:
+            storage.OWNER_CHAT_ID = original
+
+    def test_a_stranger_cannot_become_owner_by_talking(self):
+        db = storage.default_db()
+        db["owner"] = CHAT
+        storage.get_chat(db, CHAT)
+        update = {"update_id": 1,
+                  "message": {"text": "안녕", "chat": {"id": 55554444}}}
+        original = telegram_api.get_updates
+        telegram_api.get_updates = bot.telegram_api.get_updates = (
+            lambda offset, timeout=0, limit=50: [update])
+        try:
+            with FakeTelegram():
+                bot.process_updates(db, browser=None, timeout=0)
+        finally:
+            telegram_api.get_updates = bot.telegram_api.get_updates = original
+        self.assertEqual(db["owner"], CHAT)
+
+
+class WhoAmITest(unittest.TestCase):
+    """채팅 ID 를 알려주는 명령."""
+
+    def setUp(self):
+        self.db = storage.default_db()
+        self.db["owner"] = CHAT
+
+    def say(self, chat_id, text):
+        return bot.handle_text(self.db, chat_id, text, today=TODAY)
+
+    def test_tells_the_owner_their_id(self):
+        replies = self.say(CHAT, "내아이디")
+        self.assertIn(CHAT, texts(replies))
+        self.assertIn("주인이에요", texts(replies))
+        self.assertIn("OWNER_CHAT_ID", texts(replies))
+
+    def test_tells_a_stranger_they_are_not_the_owner(self):
+        replies = self.say("777", "내아이디")
+        self.assertIn("777", texts(replies))
+        self.assertIn("주인이 아니에요", texts(replies))
+        self.assertNotIn(CHAT, texts(replies))   # 주인 ID 는 안 알려준다
+
+    def test_other_spellings(self):
+        for word in ("아이디", "내번호", "whoami", "/id"):
+            self.assertIn(CHAT, texts(self.say(CHAT, word)), word)

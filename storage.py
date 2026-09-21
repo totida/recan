@@ -28,6 +28,10 @@ GIST_TOKEN = os.environ.get("GIST_TOKEN", "").strip()
 GIST_FILENAME = os.environ.get("GIST_FILENAME", "users.json").strip() or "users.json"
 GIST_API = "https://api.github.com/gists/"
 
+# 주인을 못 박아 두고 싶을 때. 비워 두면 이미 쓰고 있는 사람을 주인으로 본다.
+# 저장소가 공개이므로 워크플로에 그대로 적지 말고 비밀값으로 넣는다.
+OWNER_CHAT_ID = os.environ.get("OWNER_CHAT_ID", "").strip()
+
 
 class StorageError(RuntimeError):
     """저장소를 읽지 못했을 때. 빈 상태로 시작해 덮어쓰는 사고를 막는다."""
@@ -73,7 +77,34 @@ _last_saved = {}
 
 
 def default_db():
-    return {"version": SCHEMA_VERSION, "last_update_id": 0, "chats": {}}
+    # owner: 이 봇을 만든 사람의 채팅. 새 사람이 말을 걸면 여기로 알린다.
+    return {"version": SCHEMA_VERSION, "last_update_id": 0, "owner": "", "chats": {}}
+
+
+def ensure_owner(db):
+    """주인을 알려준다. 한 번 정해지면 절대 바뀌지 않는다.
+
+    순서는 이렇다.
+      1) OWNER_CHAT_ID 를 넣어 두었으면 무조건 그 사람이다.
+      2) 이미 정해져 있으면 그대로 둔다. 남이 숙소를 더 많이 등록해도,
+         주인이 자기 숙소를 다 지워도 바뀌지 않는다.
+      3) 아직 없으면 이미 쓰고 있는 사람(감시 중인 숙소가 가장 많은 채팅)을
+         주인으로 삼는다. 아무도 없으면 비워 두고, 처음 말을 건 사람이 된다.
+    """
+    if OWNER_CHAT_ID:
+        if db.get("owner") != OWNER_CHAT_ID:
+            db["owner"] = OWNER_CHAT_ID
+            print(f"👑 주인을 설정값으로 고정했습니다(…{OWNER_CHAT_ID[-4:]}).")
+        return OWNER_CHAT_ID
+    if db.get("owner"):
+        return db["owner"]
+    chats = db.get("chats") or {}
+    if not chats:
+        return ""
+    best = max(chats, key=lambda key: len(chats[key].get("watches") or []))
+    db["owner"] = best
+    print(f"👑 주인을 정했습니다(…{best[-4:]}). 앞으로 바뀌지 않습니다.")
+    return best
 
 
 def new_watch(query, checkin, checkout, guests=2, url=None, address="", keyword="",
@@ -141,12 +172,14 @@ def migrate(raw):
     if not isinstance(raw, dict):
         return default_db()
     if raw.get("version") == SCHEMA_VERSION and "chats" in raw:
+        raw.setdefault("owner", "")
         for chat in raw["chats"].values():
             chat.setdefault("state", None)
             chat.setdefault("watches", [])
             for watch in chat["watches"]:
                 watch.setdefault("address", "")
                 watch.setdefault("keyword", watch.get("query", ""))
+        ensure_owner(raw)
         return raw
 
     db = default_db()
@@ -160,6 +193,7 @@ def migrate(raw):
                 chat["watches"].append(
                     _watch_from_legacy_url(item["url"], item.get("last_notified", 0))
                 )
+    ensure_owner(db)
     return db
 
 
