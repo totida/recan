@@ -543,11 +543,23 @@ def handle_text(db, chat_id, text, today=None, lookup=None):
 
     if head_lower in ("내아이디", "아이디", "내번호", "whoami", "id"):
         owner = storage.ensure_owner(db)
-        role = "주인이에요 👑" if str(chat_id) == str(owner) else "주인이 아니에요"
-        return [reply(f"이 대화의 채팅 ID 는 {chat_id} 입니다.\n"
-                      f"당신은 이 봇의 {role}\n\n"
-                      "이 번호를 OWNER_CHAT_ID 비밀값으로 넣어 두면 "
-                      "주인이 영영 바뀌지 않아요.")]
+        mine = str(chat_id) == str(owner)
+        lines = [f"이 대화의 채팅 ID 는 {chat_id} 입니다.",
+                 f"당신은 이 봇의 {'주인이에요 👑' if mine else '주인이 아니에요'}",
+                 ""]
+        source = storage.owner_source(db)
+        if source == "secret":
+            lines.append("🔒 주인은 OWNER_CHAT_ID 비밀값으로 고정돼 있어요.")
+            if not mine:
+                lines.append("비밀값에 넣은 번호가 이 번호와 다릅니다.")
+        elif source == "stored":
+            lines.append("📌 주인은 등록 내용에 저장돼 있어요. "
+                         "(OWNER_CHAT_ID 비밀값은 안 넣으신 상태예요)")
+            if mine:
+                lines.append("이 번호를 OWNER_CHAT_ID 로 넣어 두면 더 확실해요.")
+        else:
+            lines.append("아직 주인이 없어요.")
+        return [reply("\n".join(lines))]
 
     if head_lower in ("추가", "등록", "add"):
         chat["state"] = None

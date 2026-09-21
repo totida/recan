@@ -81,6 +81,13 @@ def default_db():
     return {"version": SCHEMA_VERSION, "last_update_id": 0, "owner": "", "chats": {}}
 
 
+def owner_source(db):
+    """주인이 어떻게 정해졌는지: "secret" | "stored" | "none"."""
+    if OWNER_CHAT_ID:
+        return "secret"
+    return "stored" if db.get("owner") else "none"
+
+
 def ensure_owner(db):
     """주인을 알려준다. 한 번 정해지면 절대 바뀌지 않는다.
 

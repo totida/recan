@@ -1089,3 +1089,45 @@ class OwnerStartupNoticeTest(unittest.TestCase):
 
     def test_empty_owner_is_reported(self):
         self.assertEqual(self.check(storage.default_db()), "없음")
+
+
+class OwnerSourceTest(unittest.TestCase):
+    """비밀값이 먹혔는지 '내아이디' 로 구분되는지."""
+
+    def setUp(self):
+        self.db = storage.default_db()
+        self.db["owner"] = CHAT
+        storage.get_chat(self.db, CHAT)
+        self._saved = storage.OWNER_CHAT_ID
+
+    def tearDown(self):
+        storage.OWNER_CHAT_ID = self._saved
+
+    def say(self, chat_id=CHAT):
+        return texts(bot.handle_text(self.db, chat_id, "내아이디", today=TODAY))
+
+    def test_says_when_the_secret_is_in_use(self):
+        storage.OWNER_CHAT_ID = CHAT
+        answer = self.say()
+        self.assertIn("주인이에요", answer)
+        self.assertIn("비밀값으로 고정", answer)
+
+    def test_says_when_the_secret_is_missing(self):
+        storage.OWNER_CHAT_ID = ""
+        answer = self.say()
+        self.assertIn("주인이에요", answer)
+        self.assertIn("안 넣으신 상태", answer)
+
+    def test_warns_when_the_secret_points_elsewhere(self):
+        storage.OWNER_CHAT_ID = "88889999"
+        answer = self.say()
+        self.assertIn("주인이 아니에요", answer)
+        self.assertIn("이 번호와 다릅니다", answer)
+        self.assertNotIn("88889999", answer)   # 비밀값은 안 보여준다
+
+    def test_the_two_answers_differ(self):
+        storage.OWNER_CHAT_ID = CHAT
+        with_secret = self.say()
+        storage.OWNER_CHAT_ID = ""
+        without = self.say()
+        self.assertNotEqual(with_secret, without)
