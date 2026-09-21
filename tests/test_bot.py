@@ -1063,3 +1063,29 @@ class WhoAmITest(unittest.TestCase):
     def test_other_spellings(self):
         for word in ("아이디", "내번호", "whoami", "/id"):
             self.assertIn(CHAT, texts(self.say(CHAT, word)), word)
+
+
+class OwnerStartupNoticeTest(unittest.TestCase):
+    """OWNER_CHAT_ID 를 잘못 넣으면 실행 기록에서 알아챌 수 있는지."""
+
+    def check(self, db):
+        """main() 이 찍는 주인 안내를 그대로 만들어 본다."""
+        owner = storage.ensure_owner(db)
+        if not owner:
+            return "없음"
+        return "정상" if owner in db["chats"] else "경고"
+
+    def test_known_owner_is_fine(self):
+        db = storage.default_db()
+        db["owner"] = CHAT
+        storage.get_chat(db, CHAT)
+        self.assertEqual(self.check(db), "정상")
+
+    def test_owner_who_never_talked_is_flagged(self):
+        db = storage.default_db()
+        storage.get_chat(db, CHAT)
+        db["owner"] = "88889999"        # 오타로 넣은 번호
+        self.assertEqual(self.check(db), "경고")
+
+    def test_empty_owner_is_reported(self):
+        self.assertEqual(self.check(storage.default_db()), "없음")
