@@ -1036,3 +1036,30 @@ class OwnerNeverChangesTest(unittest.TestCase):
         finally:
             telegram_api.get_updates = bot.telegram_api.get_updates = original
         self.assertEqual(db["owner"], CHAT)
+
+
+class WhoAmITest(unittest.TestCase):
+    """채팅 ID 를 알려주는 명령."""
+
+    def setUp(self):
+        self.db = storage.default_db()
+        self.db["owner"] = CHAT
+
+    def say(self, chat_id, text):
+        return bot.handle_text(self.db, chat_id, text, today=TODAY)
+
+    def test_tells_the_owner_their_id(self):
+        replies = self.say(CHAT, "내아이디")
+        self.assertIn(CHAT, texts(replies))
+        self.assertIn("주인이에요", texts(replies))
+        self.assertIn("OWNER_CHAT_ID", texts(replies))
+
+    def test_tells_a_stranger_they_are_not_the_owner(self):
+        replies = self.say("777", "내아이디")
+        self.assertIn("777", texts(replies))
+        self.assertIn("주인이 아니에요", texts(replies))
+        self.assertNotIn(CHAT, texts(replies))   # 주인 ID 는 안 알려준다
+
+    def test_other_spellings(self):
+        for word in ("아이디", "내번호", "whoami", "/id"):
+            self.assertIn(CHAT, texts(self.say(CHAT, word)), word)

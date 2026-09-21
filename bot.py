@@ -86,6 +86,7 @@ HELP_TEXT = (
     "  인원 2 4 — 2번 알림을 4명으로 변경\n"
     "  지금 — 기다리지 않고 바로 검색\n"
     "  취소 — 입력 중이던 등록 취소\n"
+    "  내아이디 — 이 대화의 채팅 ID 보기\n"
     "  도움말 — 이 안내 다시 보기"
 )
 
@@ -539,6 +540,14 @@ def handle_text(db, chat_id, text, today=None, lookup=None):
     if head_lower in ("start", "help", "시작", "도움말", "사용법"):
         chat["state"] = None
         return [reply(HELP_TEXT)]
+
+    if head_lower in ("내아이디", "아이디", "내번호", "whoami", "id"):
+        owner = storage.ensure_owner(db)
+        role = "주인이에요 👑" if str(chat_id) == str(owner) else "주인이 아니에요"
+        return [reply(f"이 대화의 채팅 ID 는 {chat_id} 입니다.\n"
+                      f"당신은 이 봇의 {role}\n\n"
+                      "이 번호를 OWNER_CHAT_ID 비밀값으로 넣어 두면 "
+                      "주인이 영영 바뀌지 않아요.")]
 
     if head_lower in ("추가", "등록", "add"):
         chat["state"] = None
