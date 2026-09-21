@@ -1,5 +1,6 @@
 import os
 import sys
+import json
 import time
 import unittest
 from datetime import date
@@ -981,3 +982,57 @@ class OwnerGuessTest(unittest.TestCase):
 
     def test_no_owner_when_nobody_has_used_it(self):
         self.assertEqual(storage.ensure_owner(storage.default_db()), "")
+
+
+class OwnerNeverChangesTest(unittest.TestCase):
+    """주인은 한 번 정해지면 바뀌지 않는다."""
+
+    def test_someone_else_with_more_watches_does_not_take_over(self):
+        db = storage.default_db()
+        db["owner"] = "111"
+        storage.get_chat(db, "111")            # 주인은 숙소가 하나도 없고
+        greedy = storage.get_chat(db, "222")   # 남이 잔뜩 등록해도
+        greedy["watches"] = [storage.new_watch(str(n), "2026-05-02", "2026-05-03")
+                             for n in range(5)]
+        self.assertEqual(storage.ensure_owner(db), "111")
+
+    def test_owner_survives_losing_all_watches(self):
+        db = storage.default_db()
+        db["owner"] = "111"
+        storage.get_chat(db, "111")["watches"] = []
+        self.assertEqual(storage.ensure_owner(db), "111")
+
+    def test_owner_survives_a_reload(self):
+        db = storage.default_db()
+        db["owner"] = "111"
+        storage.get_chat(db, "222")["watches"] = [
+            storage.new_watch("가", "2026-05-02", "2026-05-03")]
+        again = storage.migrate(json.loads(json.dumps(db)))
+        self.assertEqual(again["owner"], "111")
+
+    def test_setting_wins_over_everything(self):
+        original = storage.OWNER_CHAT_ID
+        storage.OWNER_CHAT_ID = "999"
+        try:
+            db = storage.default_db()
+            db["owner"] = "111"
+            self.assertEqual(storage.ensure_owner(db), "999")
+            self.assertEqual(db["owner"], "999")
+        finally:
+            storage.OWNER_CHAT_ID = original
+
+    def test_a_stranger_cannot_become_owner_by_talking(self):
+        db = storage.default_db()
+        db["owner"] = CHAT
+        storage.get_chat(db, CHAT)
+        update = {"update_id": 1,
+                  "message": {"text": "안녕", "chat": {"id": 55554444}}}
+        original = telegram_api.get_updates
+        telegram_api.get_updates = bot.telegram_api.get_updates = (
+            lambda offset, timeout=0, limit=50: [update])
+        try:
+            with FakeTelegram():
+                bot.process_updates(db, browser=None, timeout=0)
+        finally:
+            telegram_api.get_updates = bot.telegram_api.get_updates = original
+        self.assertEqual(db["owner"], CHAT)

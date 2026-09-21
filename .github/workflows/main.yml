@@ -72,6 +72,9 @@ jobs:
           # 시크릿이 없으면 지금까지처럼 저장소의 users.json 에 저장한다.
           GIST_ID: ${{ secrets.GIST_ID }}
           GIST_TOKEN: ${{ secrets.GIST_TOKEN }}
+          # 주인을 못 박고 싶을 때만 넣는다. 비워 두면 이미 쓰고 있는
+          # 사람이 주인이 되고, 그 뒤로는 바뀌지 않는다.
+          OWNER_CHAT_ID: ${{ secrets.OWNER_CHAT_ID }}
         run: python bot.py
 
       - name: 남은 변경 사항 저장
