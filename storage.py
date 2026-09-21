@@ -73,7 +73,24 @@ _last_saved = {}
 
 
 def default_db():
-    return {"version": SCHEMA_VERSION, "last_update_id": 0, "chats": {}}
+    # owner: 이 봇을 만든 사람의 채팅. 새 사람이 말을 걸면 여기로 알린다.
+    return {"version": SCHEMA_VERSION, "last_update_id": 0, "owner": "", "chats": {}}
+
+
+def ensure_owner(db):
+    """주인이 정해져 있지 않으면 이미 쓰고 있는 사람을 주인으로 본다.
+
+    감시 중인 숙소가 가장 많은 채팅을 고른다. 아무도 없으면 비워 두고,
+    나중에 처음 말을 건 사람이 주인이 된다.
+    """
+    if db.get("owner"):
+        return db["owner"]
+    chats = db.get("chats") or {}
+    if not chats:
+        return ""
+    best = max(chats, key=lambda key: len(chats[key].get("watches") or []))
+    db["owner"] = best
+    return best
 
 
 def new_watch(query, checkin, checkout, guests=2, url=None, address="", keyword="",
@@ -141,12 +158,14 @@ def migrate(raw):
     if not isinstance(raw, dict):
         return default_db()
     if raw.get("version") == SCHEMA_VERSION and "chats" in raw:
+        raw.setdefault("owner", "")
         for chat in raw["chats"].values():
             chat.setdefault("state", None)
             chat.setdefault("watches", [])
             for watch in chat["watches"]:
                 watch.setdefault("address", "")
                 watch.setdefault("keyword", watch.get("query", ""))
+        ensure_owner(raw)
         return raw
 
     db = default_db()
@@ -160,6 +179,7 @@ def migrate(raw):
                 chat["watches"].append(
                     _watch_from_legacy_url(item["url"], item.get("last_notified", 0))
                 )
+    ensure_owner(db)
     return db
 
 

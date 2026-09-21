@@ -908,3 +908,76 @@ class StayAwakeDuringSearchTest(unittest.TestCase):
             bot.run_due_searches(self.db, browser=self.CountingBrowser(),
                                  today=TODAY)
         self.assertIn("비토애 산청", fake.text())
+
+
+class NewPersonNoticeTest(unittest.TestCase):
+    """남이 봇을 쓰기 시작하면 주인에게 알리는지."""
+
+    OTHER = "99887766"
+
+    def setUp(self):
+        self.db = storage.default_db()
+        self.db["owner"] = CHAT
+        storage.get_chat(self.db, CHAT)   # 주인은 이미 쓰고 있다
+
+    def feed(self, chat_id, text="안녕"):
+        update = {"update_id": 1,
+                  "message": {"text": text, "chat": {"id": int(chat_id)}}}
+        original = telegram_api.get_updates
+        telegram_api.get_updates = bot.telegram_api.get_updates = (
+            lambda offset, timeout=0, limit=50: [update])
+        try:
+            bot.process_updates(self.db, browser=None, timeout=0)
+        finally:
+            telegram_api.get_updates = bot.telegram_api.get_updates = original
+
+    def test_owner_hears_about_a_stranger(self):
+        with FakeTelegram() as fake:
+            self.feed(self.OTHER)
+        notices = [text for chat, text in fake.sent
+                   if chat == CHAT and "새로운 사람" in text]
+        self.assertEqual(len(notices), 1)
+        self.assertIn("…7766", notices[0])          # 가린 채팅 ID
+        self.assertNotIn(self.OTHER, notices[0])    # 전체 ID 는 안 보낸다
+
+    def test_only_once_per_person(self):
+        with FakeTelegram() as fake:
+            self.feed(self.OTHER)
+            self.feed(self.OTHER, "목록")
+        notices = [t for c, t in fake.sent if c == CHAT and "새로운 사람" in t]
+        self.assertEqual(len(notices), 1)
+
+    def test_owner_is_not_announced(self):
+        with FakeTelegram() as fake:
+            self.feed(CHAT)
+        self.assertEqual([t for c, t in fake.sent if "새로운 사람" in t], [])
+
+    def test_first_person_becomes_the_owner(self):
+        db = storage.default_db()
+        self.db = db
+        with FakeTelegram() as fake:
+            self.feed(self.OTHER)
+        self.assertEqual(db["owner"], self.OTHER)
+        self.assertEqual([t for c, t in fake.sent if "새로운 사람" in t], [])
+
+
+class OwnerGuessTest(unittest.TestCase):
+    """이미 쓰고 있던 사람을 주인으로 이어받는지."""
+
+    def test_picks_the_one_with_the_most_watches(self):
+        db = storage.default_db()
+        busy = storage.get_chat(db, "111")
+        busy["watches"] = [storage.new_watch("가", "2026-05-02", "2026-05-03"),
+                           storage.new_watch("나", "2026-05-02", "2026-05-03")]
+        storage.get_chat(db, "222")
+        self.assertEqual(storage.ensure_owner(db), "111")
+
+    def test_keeps_an_owner_once_set(self):
+        db = storage.default_db()
+        db["owner"] = "333"
+        storage.get_chat(db, "111")["watches"] = [
+            storage.new_watch("가", "2026-05-02", "2026-05-03")]
+        self.assertEqual(storage.ensure_owner(db), "333")
+
+    def test_no_owner_when_nobody_has_used_it(self):
+        self.assertEqual(storage.ensure_owner(storage.default_db()), "")
