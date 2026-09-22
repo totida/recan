@@ -359,7 +359,40 @@ def address_line(text):
     return ""
 
 
-def analyze_cards(query, cards, search_url="", limit=3, address=None):
+# 객실 카드에 적힌 '최대 5인' 같은 인원. 숫자만 있는 '최대 12' 는 할인율 등일
+# 수 있으므로 단위가 붙은 것만 인정한다.
+CAPACITY_RE = re.compile(r"최대\s*(\d{1,2})\s*(?:인|명)")
+
+
+def room_capacity(text):
+    """카드에 적힌 최대 투숙 인원. 안 적혀 있으면 None."""
+    found = [int(m.group(1)) for m in CAPACITY_RE.finditer(text or "")]
+    return max(found) if found else None
+
+
+def fits_guests(text, guests):
+    """그 인원이 묵을 수 있는 객실인가.
+
+    예약사이트는 '인원 기준에는 맞지 않지만 이런 객실도 있어요' 하면서
+    작은 방까지 함께 보여준다. 7명을 찾는데 '기준 4인 / 최대 5인' 짜리가
+    예약 가능으로 올라오면 안 된다.
+
+    인원이 안 적힌 카드는 판단하지 않는다 — 모르는 것과 안 맞는 것은 다르다.
+    """
+    if not guests:
+        return True
+    capacity = room_capacity(text)
+    return capacity is None or capacity >= guests
+
+
+def too_small_count(query, cards, guests):
+    """이름은 맞지만 인원이 모자라 걸러낸 카드 수."""
+    return sum(1 for card in cards or []
+               if card_matches(query, card.get("text", ""))
+               and not fits_guests(card.get("text", ""), guests))
+
+
+def analyze_cards(query, cards, search_url="", limit=3, address=None, guests=None):
     """검색결과 카드 목록 → 예약 가능 여부.
 
     cards: [{"text": ..., "url": ...}, ...]
@@ -383,12 +416,15 @@ def analyze_cards(query, cards, search_url="", limit=3, address=None):
     if not scored:
         return STATUS_NONE, []
 
-    offers, soldout, unknown = [], 0, 0
+    offers, soldout, unknown, too_small = [], 0, 0, 0
     seen = set()
     for card, score in scored:
         text = card.get("text", "")
         if is_soldout(text):
             soldout += 1
+            continue
+        if not fits_guests(text, guests):
+            too_small += 1     # 인원이 안 맞는 방은 빈방이라도 소용없다
             continue
         price = find_price(text)
         title = card_title(text, fallback=query, query=query)
@@ -409,7 +445,7 @@ def analyze_cards(query, cards, search_url="", limit=3, address=None):
 
     if offers:
         return STATUS_AVAILABLE, offers[:limit]
-    if soldout:
+    if soldout or too_small:
         return STATUS_SOLDOUT, []
     if unknown:
         return STATUS_UNKNOWN, []
@@ -938,11 +974,18 @@ def _search_site(browser, watch, site):
                 if detail.status != STATUS_UNKNOWN:
                     return detail
 
+        guests = watch.get("guests")
         status, offers = analyze_cards(term, cards, url,
-                                       address=watch.get("address"))
+                                       address=watch.get("address"),
+                                       guests=guests)
+        note = ""
+        if status == STATUS_SOLDOUT and not offers:
+            dropped = too_small_count(term, cards, guests)
+            if dropped:
+                note = f"{guests}명이 묵을 수 있는 방이 없어요"
         if detail is not None and status == STATUS_NONE:
             return detail  # 상세도 검색도 확실치 않으면 상세 쪽 안내를 쓴다
-        result = SiteResult(site["key"], site["name"], status, url, offers)
+        result = SiteResult(site["key"], site["name"], status, url, offers, note)
         if status != STATUS_NONE:
             return result  # 이름이 맞는 카드를 찾았으니 이 주소를 쓴다
 

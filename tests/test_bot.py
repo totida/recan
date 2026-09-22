@@ -1131,3 +1131,26 @@ class OwnerSourceTest(unittest.TestCase):
         storage.OWNER_CHAT_ID = ""
         without = self.say()
         self.assertNotEqual(with_secret, without)
+
+
+class TooSmallRoomReportTest(unittest.TestCase):
+    """인원이 안 맞는 방만 남았을 때 보고 내용."""
+
+    SMALL = ("소노캄 경주\n디럭스 스위트B\n기준 4인 / 최대 5인\n628,000원")
+
+    def setUp(self):
+        self.db = storage.default_db()
+        for message in ("소노캄 경주 10/4~10/5", "경상북도 경주시", "7", "예"):
+            bot.handle_text(self.db, CHAT, message, today=TODAY)
+        self.watch = storage.get_chat(self.db, CHAT)["watches"][0]
+        self.watch["force"] = True
+
+    def test_does_not_shout_about_a_room_that_is_too_small(self):
+        browser = FakeBrowser(cards=[{"text": self.SMALL, "url": "https://x/1"}])
+        with FakeTelegram() as fake:
+            bot.run_due_searches(self.db, now=1_000_000.0, today=TODAY,
+                                 browser=browser)
+        self.assertEqual(self.watch["guests"], 7)
+        self.assertNotIn("예약 가능한 방을 찾았어요", fake.text())
+        self.assertNotIn("628,000원", fake.text())
+        self.assertIn("7명이 묵을 수 있는 방이 없어요", fake.text())
