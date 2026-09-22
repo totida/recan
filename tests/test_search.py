@@ -773,3 +773,175 @@ class GuestCapacityTest(unittest.TestCase):
     def test_no_guests_means_no_filtering(self):
         self.assertTrue(search.fits_guests(self.SMALL, None))
         self.assertTrue(search.fits_guests(self.SMALL, 0))
+
+
+# 실제로 겪은 오탐: 7명으로 감시 중인 '소노캄 경주'를 야놀자가 예약 가능
+# (567,000원)이라고 알려 왔다. 야놀자 검색 목록은 인원을 무시하고 2인 기준
+# 최저가를 보여주기 때문이다. 상세 페이지를 열어 보면 인원에 맞는 방은 없고
+# '인원 기준에는 맞지 않지만 이런 객실도 있어요' 아래 작은 방들뿐이었다.
+YANOLJA_NO_FIT = """소노캄 경주
+경상북도 경주시 보문로 484-7
+객실 선택
+10.04~10.05, 1박
+성인 7, 아동 0
+인원 기준에는 맞지 않지만
+이런 객실도 있어요
+디럭스 트윈
+기준 2인 / 최대 4인
+최대 인원 초과
+디럭스 온돌
+기준 2인 / 최대 4인
+예약마감
+(판매가 508,000원)
+"""
+
+YANOLJA_HAS_FIT = """소노캄 경주
+경상북도 경주시 보문로 484-7
+객실 선택
+10.04~10.05, 1박
+성인 7, 아동 0
+스위트 스파 온돌
+기준 6인 / 최대 8인
+790,000원
+인원 기준에는 맞지 않지만
+이런 객실도 있어요
+디럭스 트윈
+최대 인원 초과
+"""
+
+YANOLJA_ALL_CLOSED = """소노캄 경주
+경상북도 경주시 보문로 484-7
+객실 선택
+10.04~10.05, 1박
+성인 7, 아동 0
+스위트 스파 온돌
+기준 6인 / 최대 8인
+예약마감
+(판매가 790,000원)
+"""
+
+
+class StayDetailTest(unittest.TestCase):
+    def test_rooms_that_fit_are_found(self):
+        status, note = search.analyze_stay_detail(YANOLJA_HAS_FIT, 7)
+        self.assertEqual(status, search.STATUS_AVAILABLE)
+        self.assertEqual(note, "")
+
+    def test_only_oversized_rooms_is_soldout(self):
+        status, note = search.analyze_stay_detail(YANOLJA_NO_FIT, 7)
+        self.assertEqual(status, search.STATUS_SOLDOUT)
+        self.assertEqual(note, "7명이 묵을 수 있는 방이 없어요")
+
+    def test_closed_room_price_is_not_availability(self):
+        # '(판매가 790,000원)'은 마감된 방의 정가 안내일 뿐이다
+        status, _ = search.analyze_stay_detail(YANOLJA_ALL_CLOSED, 7)
+        self.assertEqual(status, search.STATUS_SOLDOUT)
+
+    def test_price_above_the_room_list_is_ignored(self):
+        # 화면 위쪽 '567,000원~' 미리보기는 인원과 상관없이 떠 있다
+        page = "소노캄 경주\n숙박 15:00~\n567,000원~\n" + YANOLJA_NO_FIT
+        self.assertEqual(search.analyze_stay_detail(page, 7)[0],
+                         search.STATUS_SOLDOUT)
+
+    def test_unreadable_page_is_unknown(self):
+        self.assertEqual(search.analyze_stay_detail("잠시만요")[0],
+                         search.STATUS_UNKNOWN)
+        self.assertEqual(search.analyze_stay_detail("소노캄 경주 " * 40)[0],
+                         search.STATUS_UNKNOWN)
+
+
+class GuestParamTest(unittest.TestCase):
+    def test_list_link_guest_count_is_replaced(self):
+        url = search.with_guest_count(
+            "https://nol.yanolja.com/stay/domestic/3000930"
+            "?adultCount=2&checkInDate=2026-10-04", "adultCount", 7)
+        self.assertIn("adultCount=7", url)
+        self.assertNotIn("adultCount=2", url)
+        self.assertIn("checkInDate=2026-10-04", url)
+
+    def test_link_without_the_param(self):
+        url = search.with_guest_count(
+            "https://nol.yanolja.com/stay/domestic/3000930", "adultCount", 7)
+        self.assertEqual(
+            url, "https://nol.yanolja.com/stay/domestic/3000930?adultCount=7")
+
+    def test_nothing_to_change(self):
+        link = "https://nol.yanolja.com/stay/domestic/3000930"
+        self.assertEqual(search.with_guest_count(link, "", 7), link)
+        self.assertEqual(search.with_guest_count(link, "adultCount", None), link)
+
+    def test_closest_name_wins(self):
+        cards = [
+            {"text": "경주 소노캄 게스트하우스\n60,000원",
+             "url": "https://nol.yanolja.com/stay/domestic/1?adultCount=2"},
+            {"text": "소노캄 경주\n경주시 신평동\n567,000원",
+             "url": "https://nol.yanolja.com/stay/domestic/3000930?adultCount=2"},
+            {"text": "소노캄 경주\n특가",
+             "url": "https://nol.yanolja.com/promotion/1"},
+        ]
+        self.assertEqual(
+            search.detail_link("소노캄 경주", cards, "/stay/domestic/",
+                               prefer="소노캄 경주"),
+            "https://nol.yanolja.com/stay/domestic/3000930?adultCount=2")
+
+    def test_no_matching_card(self):
+        cards = [{"text": "한화리조트 경주", "url": "https://nol.yanolja.com/stay/domestic/9"}]
+        self.assertEqual(
+            search.detail_link("소노캄 경주", cards, "/stay/domestic/"), "")
+
+
+class YanoljaFollowsDetailTest(unittest.TestCase):
+    """목록만 믿지 않고 상세 페이지까지 따라가는지."""
+
+    SITE = {
+        "key": "yanolja", "name": "야놀자",
+        "urls": ["https://nol.yanolja.com/search?q={query}"
+                 "&checkInDate={checkin}&checkOutDate={checkout}"
+                 "&adultCount={guests}"],
+        "follow_detail": {"link_contains": "/stay/domestic/",
+                          "guest_param": "adultCount"},
+    }
+    WATCH = {"query": "소노캄 경주", "keyword": "소노캄 경주",
+             "checkin": "2026-10-04", "checkout": "2026-10-05", "guests": 7}
+    CARDS = [{"text": "숙박페스타\n프리미엄 리조트\n소노캄 경주\n경주시 신평동\n567,000\n원~",
+              "url": "https://nol.yanolja.com/stay/domestic/3000930"
+                     "?adultCount=2&checkInDate=2026-10-04"}]
+
+    class FakeBrowser:
+        def __init__(self, cards, page):
+            self.cards = cards
+            self.page = page
+            self.opened = []
+
+        def collect_cards(self, url, selectors, wait=6, scrolls=2,
+                          retry_wait=5, ready=None):
+            return self.cards
+
+        def page_text(self, url, **kwargs):
+            self.opened.append(url)
+            return self.page
+
+        def body_text(self, limit=2000):
+            return ""
+
+    def test_list_price_alone_does_not_alert(self):
+        browser = self.FakeBrowser(self.CARDS, YANOLJA_NO_FIT)
+        result = search._search_site(browser, self.WATCH, self.SITE)
+        self.assertEqual(result.key, "yanolja")
+        self.assertEqual(result.status, search.STATUS_SOLDOUT)
+        self.assertEqual(result.note, "7명이 묵을 수 있는 방이 없어요")
+        # 목록 링크의 2인이 아니라 우리 인원으로 열어야 한다
+        self.assertIn("adultCount=7", browser.opened[0])
+        self.assertNotIn("adultCount=2", browser.opened[0])
+
+    def test_real_vacancy_still_alerts(self):
+        browser = self.FakeBrowser(self.CARDS, YANOLJA_HAS_FIT)
+        result = search._search_site(browser, self.WATCH, self.SITE)
+        self.assertEqual(result.status, search.STATUS_AVAILABLE)
+        self.assertEqual(result.offers[0].price, "790,000원")
+
+    def test_unreadable_detail_falls_back_to_the_list(self):
+        browser = self.FakeBrowser(self.CARDS, "잠시만요")
+        result = search._search_site(browser, self.WATCH, self.SITE)
+        self.assertEqual(result.status, search.STATUS_AVAILABLE)
+        self.assertTrue(result.url.startswith("https://nol.yanolja.com/search"))
