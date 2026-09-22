@@ -721,3 +721,55 @@ class WaitNoLongerThanNeededTest(unittest.TestCase):
                                     retry_wait=1)
         self.assertEqual(got, [])
         self.assertLess(_time.time() - start, 8)
+
+
+class GuestCapacityTest(unittest.TestCase):
+    """인원이 안 맞는 객실까지 예약 가능으로 올리던 문제."""
+
+    SMALL = ("소노캄 경주\n디럭스 스위트B-클린/레이크/1더블, 1싱글\n"
+             "기준 4인 / 최대 5인\n더블 침대 1개, 싱글 침대 1개\n628,000원")
+    BIG = ("소노캄 경주\n패밀리 스위트\n기준 6인 / 최대 8인\n"
+           "더블 침대 2개\n750,000원")
+    NO_CAPACITY = "소노캄 경주\n디럭스룸\n180,000원"
+
+    def test_reads_the_capacity(self):
+        self.assertEqual(search.room_capacity(self.SMALL), 5)
+        self.assertEqual(search.room_capacity(self.BIG), 8)
+        self.assertIsNone(search.room_capacity(self.NO_CAPACITY))
+
+    def test_plain_numbers_are_not_capacity(self):
+        # '감성 루프탑, 최대 12' 처럼 단위 없는 숫자는 인원이 아니다
+        self.assertIsNone(search.room_capacity("감성 루프탑, 최대 12"))
+        self.assertIsNone(search.room_capacity("최대 30% 할인"))
+
+    def test_too_small_room_is_not_offered(self):
+        status, offers = search.analyze_cards(
+            "소노캄 경주", [{"text": self.SMALL}], guests=7)
+        self.assertEqual(status, search.STATUS_SOLDOUT)
+        self.assertEqual(offers, [])
+
+    def test_big_enough_room_is_offered(self):
+        status, offers = search.analyze_cards(
+            "소노캄 경주", [{"text": self.BIG}], guests=7)
+        self.assertEqual(status, search.STATUS_AVAILABLE)
+        self.assertEqual(offers[0].price, "750,000원")
+
+    def test_room_without_capacity_is_kept(self):
+        # 인원이 안 적힌 카드는 '모르는 것'이지 '안 맞는 것'이 아니다
+        status, _ = search.analyze_cards(
+            "소노캄 경주", [{"text": self.NO_CAPACITY}], guests=7)
+        self.assertEqual(status, search.STATUS_AVAILABLE)
+
+    def test_small_room_is_fine_for_a_small_party(self):
+        status, _ = search.analyze_cards(
+            "소노캄 경주", [{"text": self.SMALL}], guests=4)
+        self.assertEqual(status, search.STATUS_AVAILABLE)
+
+    def test_counts_what_was_dropped(self):
+        cards = [{"text": self.SMALL}, {"text": self.BIG}]
+        self.assertEqual(search.too_small_count("소노캄 경주", cards, 7), 1)
+        self.assertEqual(search.too_small_count("소노캄 경주", cards, 4), 0)
+
+    def test_no_guests_means_no_filtering(self):
+        self.assertTrue(search.fits_guests(self.SMALL, None))
+        self.assertTrue(search.fits_guests(self.SMALL, 0))
