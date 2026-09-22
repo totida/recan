@@ -130,6 +130,19 @@ def main():
                         best = ("ok", url)
                         break
 
+                if site.get("follow_detail"):
+                    link = search.detail_link(
+                        args.query, cards,
+                        site["follow_detail"].get("link_contains", ""),
+                        prefer=args.query)
+                    if link:
+                        print(f"      ↪ 상세 페이지 확인: {link[:110]}")
+                        detail = search.stay_detail_result(browser, watch, link, site)
+                        print(f"        → {LABEL.get(detail.status, detail.status)}"
+                              f" ({detail.note or detail.url[:90]})")
+                        best = ("ok", url)
+                        break
+
                 if matched:
                     best = ("ok", url)
                     break
