@@ -62,7 +62,11 @@
         "div[class*='card']"
       ],
       "wait": 7,
-      "scrolls": 2
+      "scrolls": 2,
+      "follow_detail": {
+        "link_contains": "/stay/domestic/",
+        "guest_param": "adultCount"
+      }
     },
     {
       "key": "naver",

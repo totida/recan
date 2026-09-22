@@ -928,6 +928,108 @@ def triple_detail_result(browser, watch, link, name="인터파크 트리플"):
     return SiteResult("triple", name, status, url, offers, note)
 
 
+# --------------------------------------------------------------------------
+# 예약사이트 상세 페이지 확인
+#
+# 야놀자는 검색 목록에서 인원을 무시하고 2인 기준 최저가를 보여준다.
+# 7명으로 검색해도 목록에는 '567,000원~' 이 떠서 빈방이 있는 것처럼 보이지만,
+# 상세 페이지를 열어 보면 '인원 기준에는 맞지 않지만 이런 객실도 있어요'
+# 아래에 작은 방들만 '최대 인원 초과' 로 늘어서 있다.
+# 그래서 목록만 믿지 않고 상세까지 따라가 우리 인원으로 다시 확인한다.
+# --------------------------------------------------------------------------
+
+ROOM_SECTION_START = "객실 선택"
+MISMATCH_HEADER = "인원 기준에는 맞지 않지만"
+# 마감된 상품은 값을 '(판매가 508,000원)' 처럼 괄호에 넣어 보여준다.
+# 그대로 두면 마감된 방을 살 수 있는 방으로 잘못 읽는다.
+SOLDOUT_PRICE_RE = re.compile(r"\(판매가[^)]*\)")
+
+
+def fitting_rooms_section(page_text):
+    """인원에 맞는 방들만 잘라낸다.
+
+    '객실 선택'부터 '인원 기준에는 맞지 않지만' 앞까지가 인원에 맞는 방이다.
+    안 맞는 방 안내가 없으면 목록 전체가 맞는 방이다.
+    '객실 선택'이 아예 없으면 화면을 못 읽은 것이므로 빈 문자열.
+    """
+    page_text = page_text or ""
+    start = page_text.find(ROOM_SECTION_START)
+    if start < 0:
+        return ""
+    end = page_text.find(MISMATCH_HEADER, start)
+    return page_text[start:end] if end > start else page_text[start:]
+
+
+def analyze_stay_detail(page_text, guests=None):
+    """상세 페이지에서 그 인원으로 살 수 있는 방이 있는지."""
+    page_text = page_text or ""
+    if len(page_text) < 100:
+        return STATUS_UNKNOWN, ""
+
+    section = fitting_rooms_section(page_text)
+    if not section:
+        return STATUS_UNKNOWN, ""
+
+    sellable = SOLDOUT_PRICE_RE.sub(" ", section)
+    if find_price(sellable):
+        return STATUS_AVAILABLE, ""
+    if MISMATCH_HEADER in page_text:
+        return STATUS_SOLDOUT, (f"{guests}명이 묵을 수 있는 방이 없어요"
+                                if guests else "인원에 맞는 방이 없어요")
+    return STATUS_SOLDOUT, ""
+
+
+def with_guest_count(url, param, guests):
+    """상세 링크의 인원을 우리가 찾는 인원으로 바꾼다."""
+    if not param or not guests:
+        return url
+    base, _, query = (url or "").partition("?")
+    kept = [part for part in query.split("&")
+            if part and part.split("=")[0] != param]
+    kept.append(f"{param}={guests}")
+    return f"{base}?{'&'.join(kept)}"
+
+
+def detail_link(query, cards, must_contain, prefer=""):
+    """이름이 맞으면서 상세 페이지로 가는 링크를 하나 고른다.
+
+    이름이 비슷한 숙소가 여럿 뜨므로 등록된 이름과 가장 비슷한 것을 고른다.
+    """
+    best, best_score = "", -1.0
+    for card in cards or []:
+        url = card.get("url", "")
+        text = card.get("text", "")
+        if not url or must_contain not in url:
+            continue
+        if not card_matches(query, text):
+            continue
+        score = similarity(prefer or query, text)[0]
+        if score > best_score:
+            best, best_score = url, score
+    return best
+
+
+def stay_detail_result(browser, watch, url, site):
+    """상세 페이지를 우리 인원으로 열어 빈방을 다시 확인한다."""
+    guests = watch.get("guests")
+    follow = site.get("follow_detail") or {}
+    target = with_guest_count(url, follow.get("guest_param"), guests)
+    try:
+        page = browser.page_text(target)
+    except Exception as exc:  # noqa: BLE001
+        return SiteResult(site["key"], site["name"], STATUS_UNKNOWN, target,
+                          note=str(exc).splitlines()[0][:120])
+
+    status, note = analyze_stay_detail(page, guests)
+    offers = ([Offer(title="빈 객실 있음", price=find_price(page), url=target,
+                     address=address_line(page),
+                     verified=verification_flag(address_match_score(
+                         watch.get("address"), page,
+                         ignore=watch.get("query", ""))))]
+              if status == STATUS_AVAILABLE else [])
+    return SiteResult(site["key"], site["name"], status, target, offers, note)
+
+
 def search_term(watch):
     """예약사이트 검색에 쓸 말.
 
@@ -973,6 +1075,17 @@ def _search_site(browser, watch, site):
                 detail.key = site["key"]
                 if detail.status != STATUS_UNKNOWN:
                     return detail
+
+        # 야놀자는 목록에서 인원을 무시하고 2인 기준 최저가를 보여준다.
+        # 그래서 상세 페이지까지 따라가 우리 인원으로 다시 확인한다.
+        if site.get("follow_detail"):
+            link = detail_link(term, cards,
+                               site["follow_detail"].get("link_contains", ""),
+                               prefer=watch.get("query", ""))
+            if link:
+                stay = stay_detail_result(browser, watch, link, site)
+                if stay.status != STATUS_UNKNOWN:
+                    return stay
 
         guests = watch.get("guests")
         status, offers = analyze_cards(term, cards, url,
