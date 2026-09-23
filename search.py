@@ -940,6 +940,19 @@ def triple_detail_result(browser, watch, link, name="인터파크 트리플"):
 
 ROOM_SECTION_START = "객실 선택"
 MISMATCH_HEADER = "인원 기준에는 맞지 않지만"
+# 객실 목록 아래로 이어지는 다른 구역들. 여기부터는 방 목록이 아니다.
+# 펜션 안내에는 '바비큐 30,000원', '추가 인원 1인 20,000원' 같은 값이 흔해서
+# 페이지 끝까지 보면 마감된 숙소도 살 수 있는 방이 있는 것처럼 읽힌다.
+# 제목은 한 줄을 통째로 차지할 때만 인정한다. 객실 설명은 사장님이 직접 쓴
+# 글이라 그 안에 '편의시설' 같은 말이 섞여도 목록을 거기서 끊으면 안 된다.
+ROOM_SECTION_END_RE = re.compile(
+    r"^[ \t]*(?:위치/교통|위치 및 교통|숙소 소개|숙소 이용 정보|편의시설|"
+    r"취소 및 환불 규정|취소/환불 규정|판매자 정보|이용 안내|주변 정보)[ \t]*$",
+    re.M)
+# 날짜 전체가 마감일 때 객실 목록 위에 뜨는 안내
+ALL_BOOKED_PHRASES = (
+    "모든 객실이 예약되었", "모든 객실이 마감", "예약 가능한 객실이 없",
+)
 # 마감된 상품은 값을 '(판매가 508,000원)' 처럼 괄호에 넣어 보여준다.
 # 그대로 두면 마감된 방을 살 수 있는 방으로 잘못 읽는다.
 SOLDOUT_PRICE_RE = re.compile(r"\(판매가[^)]*\)")
@@ -948,16 +961,23 @@ SOLDOUT_PRICE_RE = re.compile(r"\(판매가[^)]*\)")
 def fitting_rooms_section(page_text):
     """인원에 맞는 방들만 잘라낸다.
 
-    '객실 선택'부터 '인원 기준에는 맞지 않지만' 앞까지가 인원에 맞는 방이다.
-    안 맞는 방 안내가 없으면 목록 전체가 맞는 방이다.
+    '객실 선택'부터 다음 구역('인원 기준에는 맞지 않지만', '위치/교통' 등)
+    앞까지가 인원에 맞는 방이다.
     '객실 선택'이 아예 없으면 화면을 못 읽은 것이므로 빈 문자열.
     """
     page_text = page_text or ""
     start = page_text.find(ROOM_SECTION_START)
     if start < 0:
         return ""
-    end = page_text.find(MISMATCH_HEADER, start)
-    return page_text[start:end] if end > start else page_text[start:]
+    body = start + len(ROOM_SECTION_START)
+    ends = []
+    mismatch = page_text.find(MISMATCH_HEADER, body)
+    if mismatch >= 0:
+        ends.append(mismatch)
+    heading = ROOM_SECTION_END_RE.search(page_text, body)
+    if heading:
+        ends.append(heading.start())
+    return page_text[start:min(ends)] if ends else page_text[start:]
 
 
 def analyze_stay_detail(page_text, guests=None):
@@ -970,6 +990,8 @@ def analyze_stay_detail(page_text, guests=None):
     if not section:
         return STATUS_UNKNOWN, ""
 
+    if any(phrase in section for phrase in ALL_BOOKED_PHRASES):
+        return STATUS_SOLDOUT, "모든 객실 예약 마감"
     sellable = SOLDOUT_PRICE_RE.sub(" ", section)
     if find_price(sellable):
         return STATUS_AVAILABLE, ""
