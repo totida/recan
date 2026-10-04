@@ -470,7 +470,27 @@ class SearchRunTest(unittest.TestCase):
             bot.run_due_searches(self.db, now=1_000_000.0, today=date(2026, 6, 1),
                                  browser=FakeBrowser())
         self.assertEqual(storage.get_chat(self.db, CHAT)["watches"], [])
-        self.assertIn("숙박일이 지나", fake.text())
+        self.assertIn("체크인 날짜가 지나", fake.text())
+
+    def test_removed_once_checkin_day_has_passed(self):
+        # 실제로 겪은 일: 10/4~10/5 숙소를 10/5 새벽에 '예약 가능'으로 알렸다.
+        # 체크아웃 날(5/3)이라도 체크인(5/2)이 지났으면 더 찾지 않는다.
+        browser = FakeBrowser(cards=[
+            {"text": "비토애 산청\n산청군 시천면\n120,000원", "url": "https://x/1"}])
+        with FakeTelegram() as fake:
+            bot.run_due_searches(self.db, now=1_000_000.0, today=date(2026, 5, 3),
+                                 browser=browser)
+        self.assertEqual(storage.get_chat(self.db, CHAT)["watches"], [])
+        self.assertEqual(browser.visited, [])
+        self.assertNotIn("예약 가능", fake.text())
+        self.assertIn("목록에서 삭제", fake.text())
+
+    def test_still_watched_on_checkin_day(self):
+        # 체크인 당일에는 당일 예약이 되므로 계속 찾는다
+        with FakeTelegram():
+            bot.run_due_searches(self.db, now=1_000_000.0, today=date(2026, 5, 2),
+                                 browser=FakeBrowser())
+        self.assertEqual(len(storage.get_chat(self.db, CHAT)["watches"]), 1)
 
     def test_site_that_does_not_list_the_place(self):
         """사이트가 '검색 결과가 없어요'라고 답하면 미취급으로 알린다."""
