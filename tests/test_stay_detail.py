@@ -70,3 +70,29 @@ class AllBookedDetailTest(unittest.TestCase):
                 .replace("예약마감\n(판매가 690,000원)", "690,000원"))
         self.assertEqual(search.analyze_stay_detail(page, 7)[0],
                          search.STATUS_AVAILABLE)
+
+
+class CouponAmountTest(unittest.TestCase):
+    """실제로 겪은 일: 여기어때 카드의 '최대 20,000원 쿠폰' 을 방 값으로 알렸다."""
+
+    def test_coupon_amount_is_not_the_room_price(self):
+        card = ("풀빌라\n펜션\n경주 맘편한집 키즈 풀빌라\n경주시불국사 차량 7분\n"
+                "10\n10명 평가\n최대 20,000원 쿠폰\n630,000원")
+        self.assertEqual(search.find_price(card), "630,000원")
+
+    def test_coupon_alone_is_not_a_vacancy(self):
+        # 마감된 방에 쿠폰 안내만 있으면 살 수 있는 방이 아니다
+        page = ("경주 맘편한집키즈풀빌라\n" * 5 + "객실 선택\n성인 7, 아동 0\n독채\n"
+                "기준 4인 / 최대 10인\n최대 20,000원 쿠폰\n예약마감\n"
+                "(판매가 690,000원)\n위치/교통\n")
+        self.assertEqual(search.analyze_stay_detail(page, 7)[0],
+                         search.STATUS_SOLDOUT)
+
+    def test_payment_condition_is_not_a_price(self):
+        self.assertEqual(search.find_price("30,000원 이상 결제 시 3,000원 할인"), "")
+
+    def test_real_prices_are_kept(self):
+        self.assertEqual(search.find_price("디럭스 120,000원"), "120,000원")
+        self.assertEqual(search.find_price("99,000원 할인가"), "99,000원")
+        self.assertEqual(search.find_price("630,000원\n즉시확정"), "630,000원")
+        self.assertEqual(search.find_price("₩120,000"), "120,000원")

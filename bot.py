@@ -949,10 +949,13 @@ def _collect_due(db, now, today):
                     f"⚠️ '{watch.get('query', '알 수 없음')}' 알림에 날짜 정보가 없어 삭제했어요.\n"
                     "'숙소이름 5/2~5/3' 형식으로 다시 등록해 주세요.")))
                 continue
-            if date.fromisoformat(watch["checkout"]) < today:
+            # 체크인 날짜가 지나면 그 날짜로는 더 예약할 수 없다. 체크아웃까지
+            # 기다리면 사이트가 지난 날짜를 오늘 날짜로 바꿔 보여줘서, 엉뚱한
+            # 날짜의 빈방을 우리 날짜의 빈방으로 알리게 된다.
+            if date.fromisoformat(watch["checkin"]) < today:
                 notices.append((chat_id, (
                     f"🗓️ '{watch['query']}' ({watch['checkin']} → {watch['checkout']}) "
-                    "숙박일이 지나 알림을 종료했어요.")))
+                    "체크인 날짜가 지나 목록에서 삭제했어요.")))
                 continue
             remaining.append(watch)
             if watch.get("force") or now - watch.get("last_searched", 0) >= SEARCH_INTERVAL:

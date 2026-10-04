@@ -219,10 +219,20 @@ def is_soldout(text):
     return any(keyword in lowered for keyword in SOLDOUT_KEYWORDS)
 
 
+# 방 값이 아닌 금액: '최대 20,000원 쿠폰', '30,000원 이상 결제 시', '5,000원 할인'.
+# 여기어때 카드는 방 값보다 쿠폰 금액을 먼저 적어서, 그대로 두면 쿠폰 금액을
+# 방 값으로 알리거나 마감된 방에 값이 있다고 착각한다.
+# 같은 줄에 붙어 있을 때만 본다. 줄이 바뀌면 다른 안내다.
+NON_ROOM_AMOUNT_RE = re.compile(
+    r"(?:최대[ \t]*)?(?:\d{1,3}(?:,\d{3})+|\d{4,8})[ \t]*원[ \t]*"
+    r"(?:쿠폰|할인(?!가)|이상|적립|캐시백|페이백)")
+
+
 def find_price(text):
     """카드에서 가격을 읽는다. 원 / ₩ / KRW 표기를 모두 지원."""
+    text = NON_ROOM_AMOUNT_RE.sub(" ", text or "")
     for pattern in (PRICE_RE, PRICE_SYMBOL_RE, PRICE_KRW_RE):
-        match = pattern.search(text or "")
+        match = pattern.search(text)
         if match:
             raw = match.group(1)
             if "," not in raw:
