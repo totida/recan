@@ -114,6 +114,8 @@ class ConversationTest(unittest.TestCase):
         self.say(address)
         if self.state() and self.state()["step"] == "await_guests":
             self.say(guests)
+        if self.state() and self.state()["step"] == "await_price":
+            self.say("상관없음")
         return self.say("예")
 
     # --- 네이버 후보 + 달력 -------------------------------------------------
@@ -142,12 +144,19 @@ class ConversationTest(unittest.TestCase):
         self.assertIn("guests:pick:4", buttons(replies))
 
         replies = self.tap("guests:pick:4")
+        self.assertIn("1박 가격대를 골라주세요", texts(replies))
+        self.assertIn("price:pick:100000-150000", buttons(replies))
+        self.assertIn("price:any", buttons(replies))
+
+        replies = self.tap("price:pick:100000-150000")
         self.assertIn("등록 완료", texts(replies))
+        self.assertIn("1박 10~15만원", texts(replies))
         self.assertIsNone(self.state())
 
         watch = self.watches()[0]
         self.assertEqual(watch["query"], "비토애 산청")
         self.assertEqual(watch["guests"], 4)
+        self.assertEqual((watch["price_min"], watch["price_max"]), (100000, 150000))
         self.assertEqual(watch["address"], CANDIDATES[0]["address"])
         self.assertEqual(watch["url"], CANDIDATES[0]["url"])
         self.assertEqual((watch["checkin"], watch["checkout"]), ("2026-05-02", "2026-05-04"))
@@ -171,7 +180,8 @@ class ConversationTest(unittest.TestCase):
         self.assertIn("어느 숙소인가요", texts(replies))
         replies = self.tap("place:pick:0")
         self.assertIn("몇 분이 묵으시나요", texts(replies))
-        replies = self.tap("guests:pick:3")
+        self.tap("guests:pick:3")
+        replies = self.tap("price:any")
         self.assertIn("등록 완료", texts(replies))
         self.assertEqual(self.watches()[0]["checkin"], "2026-05-02")
         self.assertEqual(self.watches()[0]["guests"], 3)
@@ -179,11 +189,13 @@ class ConversationTest(unittest.TestCase):
     def test_typed_dates_instead_of_calendar(self):
         self.say("비토애 산청", lookup=lambda q: CANDIDATES)
         self.tap("place:pick:0")
-        replies = self.say("5/2~5/4 4명")   # 인원까지 적으면 인원 질문을 건너뛴다
+        # 인원·가격대까지 적으면 그 질문들을 건너뛴다
+        replies = self.say("5/2~5/4 4명 10~15만")
         self.assertIn("등록 완료", texts(replies))
         watch = self.watches()[0]
         self.assertEqual(watch["checkout"], "2026-05-04")
         self.assertEqual(watch["guests"], 4)
+        self.assertEqual((watch["price_min"], watch["price_max"]), (100000, 150000))
 
     def test_checkout_must_be_after_checkin(self):
         self.say("비토애 산청", lookup=lambda q: CANDIDATES)
@@ -200,7 +212,8 @@ class ConversationTest(unittest.TestCase):
         self.say("경남 산청군 시천면")
         self.tap("cal:in:2026-05-02")
         self.tap("cal:out:2026-05-03")
-        replies = self.tap("guests:pick:2")
+        self.tap("guests:pick:2")
+        replies = self.tap("price:any")
         self.assertIn("확인해 주세요", texts(replies))   # 직접 입력은 한 번 더 확인
         replies = self.tap("confirm:yes")
         self.assertIn("등록 완료", texts(replies))
@@ -209,7 +222,8 @@ class ConversationTest(unittest.TestCase):
     def test_place_skip_registers_without_address(self):
         self.say("비토애 산청 5/2~5/3", lookup=lambda q: CANDIDATES)
         self.tap("place:skip")
-        replies = self.tap("guests:pick:2")
+        self.tap("guests:pick:2")
+        replies = self.tap("price:any")
         self.assertIn("확인해 주세요", texts(replies))
         self.tap("confirm:yes")
         self.assertEqual(self.watches()[0]["address"], "")
@@ -247,6 +261,7 @@ class ConversationTest(unittest.TestCase):
         self.say("비토애 산청 5/2~5/3")
         self.say("경남 산청군")
         self.say("2")
+        self.say("상관없음")
         replies = self.say("아니오")
         self.assertIn("다시 알려주세요", texts(replies))
         self.assertEqual(self.watches(), [])
@@ -255,6 +270,7 @@ class ConversationTest(unittest.TestCase):
         self.say("비토애 산청 5/2~5/3")
         self.say("경남 산청군")
         self.say("2")
+        self.say("상관없음")
         replies = self.say("음...")
         self.assertIn("'예' 또는 '아니오'", texts(replies))
         self.assertEqual(self.state()["step"], "await_confirm")
@@ -298,6 +314,7 @@ class ConversationTest(unittest.TestCase):
         replies = self.say("음...")
         self.assertIn("숫자로 알려주세요", texts(replies))
         self.say("6")
+        self.say("상관없음")
         self.say("예")
         self.assertEqual(self.watches()[0]["guests"], 6)
 
@@ -324,6 +341,8 @@ class ConversationTest(unittest.TestCase):
             "&guest=4&checkin=20260502&checkout=20260503"
         )
         replies = self.say(url)   # 링크에 guest=4 가 들어 있어 인원을 묻지 않는다
+        self.assertNotIn("몇 분이 묵으시나요", texts(replies))
+        replies = self.tap("price:any")
         self.assertIn("등록 완료", texts(replies))
         watch = self.watches()[0]
         self.assertEqual(watch["query"], "비토애 산청")
@@ -354,7 +373,7 @@ class ConversationTest(unittest.TestCase):
 class SearchRunTest(unittest.TestCase):
     def setUp(self):
         self.db = storage.default_db()
-        for message in ("비토애 산청 5/2~5/3", "경남 산청군 시천면", "2", "예"):
+        for message in ("비토애 산청 5/2~5/3", "경남 산청군 시천면", "2", "상관없음", "예"):
             bot.handle_text(self.db, CHAT, message, today=TODAY)
         self.watch = storage.get_chat(self.db, CHAT)["watches"][0]
 
@@ -620,6 +639,8 @@ class TripleLinkConversationTest(unittest.TestCase):
         self.say("건너뛰기")
         if self.state() and self.state()["step"] == "await_guests":
             self.say("2")
+        if self.state() and self.state()["step"] == "await_price":
+            self.say("상관없음")
         return self.say("예")
 
     def test_link_without_any_watch_asks_to_register_first(self):
@@ -742,6 +763,8 @@ class MenuButtonTest(unittest.TestCase):
         self.say("5/2~5/3")
         if storage.get_chat(self.db, CHAT)["state"]["step"] == "await_guests":
             self.tap("guests:pick:2")
+        if storage.get_chat(self.db, CHAT)["state"]["step"] == "await_price":
+            self.tap("price:any")
         return self.say("예")
 
     def test_button_text_becomes_a_command(self):
@@ -823,6 +846,7 @@ class NoTypingTest(unittest.TestCase):
         self.tap("cal:in:2026-05-02")     # 체크인
         self.tap("cal:out:2026-05-03")    # 체크아웃
         self.tap("guests:pick:4")         # 인원
+        self.tap("price:any")             # 가격대
         self.tap("confirm:yes")
         watches = storage.get_chat(self.db, CHAT)["watches"]
         self.assertEqual(len(watches), 1)
@@ -1160,7 +1184,7 @@ class TooSmallRoomReportTest(unittest.TestCase):
 
     def setUp(self):
         self.db = storage.default_db()
-        for message in ("소노캄 경주 10/4~10/5", "경상북도 경주시", "7", "예"):
+        for message in ("소노캄 경주 10/4~10/5", "경상북도 경주시", "7", "상관없음", "예"):
             bot.handle_text(self.db, CHAT, message, today=TODAY)
         self.watch = storage.get_chat(self.db, CHAT)["watches"][0]
         self.watch["force"] = True
@@ -1174,3 +1198,134 @@ class TooSmallRoomReportTest(unittest.TestCase):
         self.assertNotIn("예약 가능한 방을 찾았어요", fake.text())
         self.assertNotIn("628,000원", fake.text())
         self.assertIn("7명이 묵을 수 있는 방이 없어요", fake.text())
+
+
+class PriceRangeTest(unittest.TestCase):
+    """1박 가격대 — 등록 단계, '가격' 명령, 알림."""
+
+    def setUp(self):
+        self.db = storage.default_db()
+
+    def say(self, text):
+        return bot.handle_text(self.db, CHAT, text, today=TODAY)
+
+    def tap(self, data):
+        return bot.handle_callback(self.db, CHAT, data, today=TODAY)
+
+    def state(self):
+        return storage.get_chat(self.db, CHAT)["state"]
+
+    def watches(self):
+        return storage.get_chat(self.db, CHAT)["watches"]
+
+    def register(self, line, price_answer="상관없음"):
+        self.say(line)
+        self.say("경남 산청군 시천면")
+        if self.state()["step"] == "await_guests":
+            self.say("2")
+        if self.state()["step"] == "await_price":
+            self.say(price_answer)
+        return self.say("예")
+
+    def test_typed_price_at_the_price_step(self):
+        self.register("비토애 산청 5/2~5/3", price_answer="15만 이하")
+        watch = self.watches()[0]
+        self.assertEqual((watch["price_min"], watch["price_max"]), (None, 150000))
+
+    def test_numbers_without_unit_are_manwon_at_the_price_step(self):
+        self.register("비토애 산청 5/2~5/3", price_answer="10~15")
+        watch = self.watches()[0]
+        self.assertEqual((watch["price_min"], watch["price_max"]), (100000, 150000))
+
+    def test_unreadable_price_asks_again(self):
+        self.say("비토애 산청 5/2~5/3 2명")
+        self.say("경남 산청군")
+        replies = self.say("싸게")
+        self.assertIn("10~15만", texts(replies))
+        self.assertEqual(self.state()["step"], "await_price")
+
+    def test_price_in_one_line_skips_the_question(self):
+        self.say("비토애 산청 5/2~5/3 2명 10~15만")
+        replies = self.say("경남 산청군")
+        self.assertIn("💰 가격: 1박 10~15만원", texts(replies))
+        self.say("예")
+        listing = texts(self.say("목록"))
+        self.assertIn("1박 10~15만원", listing)
+
+    def test_no_price_is_shown_as_any(self):
+        self.say("비토애 산청 5/2~5/3 2명")
+        self.say("경남 산청군")
+        replies = self.tap("price:any")
+        self.assertIn("💰 가격: 상관없음", texts(replies))
+        self.say("예")
+        self.assertIsNone(self.watches()[0]["price_max"])
+        self.assertNotIn("만원", texts(self.say("목록")))
+
+    def test_price_buttons(self):
+        self.say("비토애 산청 5/2~5/3 2명")
+        self.say("경남 산청군")
+        self.assertIn("가격대를 이렇게", texts(self.tap("price:type")))
+        self.assertEqual(self.tap("price:pick:-"), [])     # 망가진 버튼 값은 무시
+        self.tap("price:pick:500000-")
+        self.assertEqual(self.state()["price_min"], 500000)
+        self.assertIsNone(self.state()["price_max"])
+        replies = self.tap("price:cancel")
+        self.assertIn("취소", texts(replies))
+        self.assertIsNone(self.state())
+
+    def test_change_price_command(self):
+        self.register("비토애 산청 5/2~5/3")
+        self.watches()[0]["force"] = False
+        replies = self.say("가격 1 10 ~ 15만")
+        self.assertIn("1박 10~15만원(으)로 바꿨어요", texts(replies))
+        watch = self.watches()[0]
+        self.assertEqual((watch["price_min"], watch["price_max"]), (100000, 150000))
+        self.assertTrue(watch["force"])          # 바뀐 가격대로 바로 재검색
+
+        replies = self.say("가격 상관없음")         # 알림이 하나면 번호를 빼도 된다
+        self.assertIn("제한을 없앴어요", texts(replies))
+        self.assertIsNone(self.watches()[0]["price_max"])
+
+    def test_change_price_needs_a_number_when_there_are_several(self):
+        self.register("비토애 산청 5/2~5/3")
+        self.register("소노벨 변산 6/1~6/2")
+        self.assertIn("'가격 2 10~15만' 처럼", texts(self.say("가격 10~15만")))
+        self.assertIn("사이의 번호", texts(self.say("가격 5 10~15만")))
+        self.assertIn("가격대를 이렇게", texts(self.say("가격 2 비싸게")))
+        self.assertIsNone(self.watches()[1]["price_max"])
+
+    def run_search(self, forced):
+        self.register("비토애 산청 5/2~5/3", price_answer="15만 이하")
+        watch = self.watches()[0]
+        watch["force"] = forced
+        card = {"text": "비토애 산청\n경남 산청군 시천면\n180,000원", "url": "https://x/1"}
+        with FakeTelegram() as fake:
+            bot.run_due_searches(self.db, now=10_000_000.0, today=TODAY,
+                                 browser=FakeBrowser(cards=[card]))
+        return fake
+
+    def test_room_above_the_price_range_is_not_an_alert(self):
+        fake = self.run_search(forced=False)
+        self.assertNotIn("예약 가능한 방을 찾았어요", fake.text())
+        self.assertFalse(self.watches()[0]["was_available"])
+
+    def test_manual_search_explains_the_price_range(self):
+        fake = self.run_search(forced=True)
+        self.assertNotIn("예약 가능한 방을 찾았어요", fake.text())
+        self.assertIn("💸", fake.text())
+        self.assertIn("가격대 밖", fake.text())
+        self.assertIn("1박 15만원 이하 안에는 빈방이 없어요", fake.text())
+
+    def test_place_named_yesan_is_not_a_command(self):
+        # 예산군은 지역 이름이다. '예산 스플라스 리솜' 은 숙소 등록이어야 한다.
+        self.say("예산 스플라스 리솜 5/2~5/3")
+        self.assertEqual(self.state()["query"], "예산 스플라스 리솜")
+
+    def test_old_watches_get_no_price_range(self):
+        old = storage.default_db()
+        storage.get_chat(old, CHAT)["watches"].append(
+            {"query": "비토애 산청", "checkin": "2026-05-02", "checkout": "2026-05-03"})
+        migrated = storage.migrate(json.loads(json.dumps(old)))
+        watch = storage.get_chat(migrated, CHAT)["watches"][0]
+        self.assertIsNone(watch["price_min"])
+        self.assertIsNone(watch["price_max"])

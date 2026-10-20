@@ -14,6 +14,8 @@
 import re
 from datetime import date, datetime, timedelta, timezone
 
+import price
+
 KST = timezone(timedelta(hours=9))
 
 MAX_NIGHTS = 30
@@ -162,23 +164,30 @@ def strip_spans(text, spans):
 
 
 def parse_request(text, today=None):
-    """한 줄 입력('비토애 산청 5/2~5/3 4명')을 통째로 해석."""
+    """한 줄 입력('비토애 산청 5/2~5/3 4명 10~15만')을 통째로 해석."""
     today = today or today_kst()
     guests = parse_guests(text)
     guest_span = _GUESTS_RE.search(text).span() if guests else None
+    budget = price.parse_range(text)
+    price_range = budget[:2] if budget else None
 
     stay = parse_stay(text, today=today)
     if stay is None:
-        return {"name": text.strip(), "checkin": None, "checkout": None, "guests": guests}
+        name = strip_spans(text, [budget[2]]) if budget else text.strip()
+        return {"name": name, "checkin": None, "checkout": None, "guests": guests,
+                "price": price_range}
 
     checkin, checkout, spans = stay
     if guest_span:
         spans = list(spans) + [guest_span]
+    if budget:
+        spans = list(spans) + [budget[2]]
     return {
         "name": strip_spans(text, spans),
         "checkin": checkin,
         "checkout": checkout,
         "guests": guests,
+        "price": price_range,
     }
 
 

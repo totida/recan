@@ -55,6 +55,8 @@ STATUS_SOLDOUT = "soldout"
 STATUS_NONE = "none"
 STATUS_UNKNOWN = "unknown"
 STATUS_ERROR = "error"
+# 빈방은 있지만 등록한 가격대(1박 기준) 안의 방이 없다.
+STATUS_OVER_BUDGET = "over_budget"
 
 
 @dataclass
@@ -241,6 +243,54 @@ def find_price(text):
     return ""
 
 
+# 여기어때는 2박 이상이면 카드에 '87,686원 /1박' 처럼 1박 값을 적는다.
+PER_NIGHT_RE = re.compile(r"/\s*1\s*박")
+
+
+def prices_in(text):
+    """방 값으로 보이는 금액을 나온 순서대로 모두 읽는다 (원 단위 숫자)."""
+    text = NON_ROOM_AMOUNT_RE.sub(" ", text or "")
+    found = []
+    for pattern in (PRICE_RE, PRICE_SYMBOL_RE, PRICE_KRW_RE):
+        found += [(m.start(), int(m.group(1).replace(",", "")))
+                  for m in pattern.finditer(text)]
+    return [value for _, value in sorted(found)]
+
+
+def watch_budget(watch):
+    """감시 항목의 1박 가격대 (최저, 최고, 박 수). 정하지 않았으면 None."""
+    low, high = watch.get("price_min"), watch.get("price_max")
+    if not low and not high:
+        return None
+    nights = (date.fromisoformat(watch["checkout"])
+              - date.fromisoformat(watch["checkin"])).days
+    return low, high, max(1, nights)
+
+
+def fits_budget(won, budget, per_night=False):
+    """그 값이 1박 가격대 안에 드는가.
+
+    2박 이상이면 사이트가 1박 값을 보여주는지 전체 값을 보여주는지
+    화면만으로는 알 수 없는 경우가 많다. '/1박' 표시가 있으면 1박 값으로
+    보고, 없으면 두 가지로 다 견줘서 하나라도 맞으면 거르지 않는다.
+    """
+    low, high, nights = budget
+    values = {won} if per_night or nights <= 1 else {won, won / nights}
+    return any((not low or value >= low) and (not high or value <= high)
+               for value in values)
+
+
+def budget_price(text, budget):
+    """가격대 안에 드는 첫 값('120,000원'). 가격대가 없으면 find_price 와 같다."""
+    if not budget:
+        return find_price(text)
+    per_night = bool(PER_NIGHT_RE.search(text or ""))
+    for won in prices_in(text):
+        if fits_budget(won, budget, per_night):
+            return f"{won:,}원"
+    return ""
+
+
 def _title_candidates(text):
     for line in (text or "").splitlines():
         line = line.strip()
@@ -402,10 +452,12 @@ def too_small_count(query, cards, guests):
                and not fits_guests(card.get("text", ""), guests))
 
 
-def analyze_cards(query, cards, search_url="", limit=3, address=None, guests=None):
+def analyze_cards(query, cards, search_url="", limit=3, address=None, guests=None,
+                  budget=None):
     """검색결과 카드 목록 → 예약 가능 여부.
 
     cards: [{"text": ..., "url": ...}, ...]
+    budget: watch_budget() 값. 주면 가격대 밖의 방은 빈방으로 치지 않는다.
     """
     matched = [c for c in cards if card_matches(query, c.get("text", ""))]
     if not matched:
@@ -426,7 +478,7 @@ def analyze_cards(query, cards, search_url="", limit=3, address=None, guests=Non
     if not scored:
         return STATUS_NONE, []
 
-    offers, soldout, unknown, too_small = [], 0, 0, 0
+    offers, soldout, unknown, too_small, over_budget = [], 0, 0, 0, 0
     seen = set()
     for card, score in scored:
         text = card.get("text", "")
@@ -445,6 +497,12 @@ def analyze_cards(query, cards, search_url="", limit=3, address=None, guests=Non
         if not price:
             unknown += 1
             continue
+        if budget:
+            # 정가·할인가처럼 값이 여럿이면 가격대 안의 값을 쓴다.
+            price = budget_price(text, budget)
+            if not price:
+                over_budget += 1
+                continue
         offers.append(Offer(
             title=title,
             price=price,
@@ -455,6 +513,8 @@ def analyze_cards(query, cards, search_url="", limit=3, address=None, guests=Non
 
     if offers:
         return STATUS_AVAILABLE, offers[:limit]
+    if over_budget:
+        return STATUS_OVER_BUDGET, []
     if soldout or too_small:
         return STATUS_SOLDOUT, []
     if unknown:
@@ -816,6 +876,9 @@ def naver_detail_result(browser, watch, place_url, name="네이버 예약"):
                           note=str(exc).splitlines()[0][:120])
 
     status, rooms, closed = analyze_naver_detail(page)
+    budget = watch_budget(watch)
+    if status == STATUS_AVAILABLE and budget and not budget_price(page, budget):
+        status = STATUS_OVER_BUDGET
     if rooms and closed <= rooms:
         note = f"객실 {rooms}개 중 {closed}개 마감"
     elif closed:
@@ -920,10 +983,16 @@ def triple_detail_result(browser, watch, link, name="인터파크 트리플"):
                           note=str(exc).splitlines()[0][:120])
 
     status, rooms = analyze_triple_detail(page)
+    budget = watch_budget(watch)
+    if (status == STATUS_AVAILABLE and budget
+            and not budget_price(_triple_room_section(page), budget)):
+        status = STATUS_OVER_BUDGET
     if status == STATUS_AVAILABLE:
         note = f"예약 가능한 객실 {rooms}개"
     elif status == STATUS_SOLDOUT:
         note = "이 날짜에 파는 객실이 없어요"
+    elif status == STATUS_OVER_BUDGET:
+        note = f"예약 가능한 객실 {rooms}개 · 가격대 밖"
     else:
         note = "객실 정보를 읽지 못했어요"
 
@@ -932,7 +1001,7 @@ def triple_detail_result(browser, watch, link, name="인터파크 트리플"):
     )
     if verified is False:
         note += " · 주소 미확인"
-    offers = ([Offer(title="빈 객실 있음", price=find_price(page), url=url,
+    offers = ([Offer(title="빈 객실 있음", price=budget_price(page, budget), url=url,
                      address=address_line(page), verified=verified)]
               if status == STATUS_AVAILABLE else [])
     return SiteResult("triple", name, status, url, offers, note)
@@ -990,8 +1059,8 @@ def fitting_rooms_section(page_text):
     return page_text[start:min(ends)] if ends else page_text[start:]
 
 
-def analyze_stay_detail(page_text, guests=None):
-    """상세 페이지에서 그 인원으로 살 수 있는 방이 있는지."""
+def analyze_stay_detail(page_text, guests=None, budget=None):
+    """상세 페이지에서 그 인원으로(가격대가 있으면 그 값에) 살 수 있는 방이 있는지."""
     page_text = page_text or ""
     if len(page_text) < 100:
         return STATUS_UNKNOWN, ""
@@ -1004,6 +1073,8 @@ def analyze_stay_detail(page_text, guests=None):
         return STATUS_SOLDOUT, "모든 객실 예약 마감"
     sellable = SOLDOUT_PRICE_RE.sub(" ", section)
     if find_price(sellable):
+        if budget and not budget_price(sellable, budget):
+            return STATUS_OVER_BUDGET, ""
         return STATUS_AVAILABLE, ""
     if MISMATCH_HEADER in page_text:
         return STATUS_SOLDOUT, (f"{guests}명이 묵을 수 있는 방이 없어요"
@@ -1052,8 +1123,9 @@ def stay_detail_result(browser, watch, url, site):
         return SiteResult(site["key"], site["name"], STATUS_UNKNOWN, target,
                           note=str(exc).splitlines()[0][:120])
 
-    status, note = analyze_stay_detail(page, guests)
-    offers = ([Offer(title="빈 객실 있음", price=find_price(page), url=target,
+    budget = watch_budget(watch)
+    status, note = analyze_stay_detail(page, guests, budget)
+    offers = ([Offer(title="빈 객실 있음", price=budget_price(page, budget), url=target,
                      address=address_line(page),
                      verified=verification_flag(address_match_score(
                          watch.get("address"), page,
@@ -1122,7 +1194,7 @@ def _search_site(browser, watch, site):
         guests = watch.get("guests")
         status, offers = analyze_cards(term, cards, url,
                                        address=watch.get("address"),
-                                       guests=guests)
+                                       guests=guests, budget=watch_budget(watch))
         note = ""
         if status == STATUS_SOLDOUT and not offers:
             dropped = too_small_count(term, cards, guests)
