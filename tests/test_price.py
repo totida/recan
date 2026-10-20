@@ -70,8 +70,9 @@ class ParseRangeTest(unittest.TestCase):
         self.assertEqual(price.describe(None, 150000), "15만원 이하")
         self.assertEqual(price.describe(500000, None), "50만원 이상")
         self.assertEqual(price.describe(None, None), "상관없음")
-        self.assertEqual(price.short_label(None, 100000), "~10만")
-        self.assertEqual(price.short_label(500000, None), "50만~")
+        self.assertEqual(price.short_label(None, 100000), "10만 이하")
+        self.assertEqual(price.short_label(500000, None), "50만 이상")
+        self.assertEqual(price.short_label(100000, 150000), "10~15만")
 
     def test_one_line_request_keeps_the_name_clean(self):
         parsed = dateparse.parse_request("비토애 산청 5/2~5/3 4명 10~15만", today=TODAY)

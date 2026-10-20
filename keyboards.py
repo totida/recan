@@ -118,20 +118,17 @@ def guests_message(query, checkin, checkout, nights):
     )
 
 
-# 1박 가격대 버튼 (최저, 최고). None 은 그쪽이 열려 있다는 뜻.
-PRICE_CHOICES = (
-    (None, 100000), (100000, 150000), (150000, 200000),
-    (200000, 300000), (300000, 500000), (500000, None),
-)
+# 1박 최대 가격 버튼. '10~15만' 같은 구간 버튼은 더 싼 방(9만)을 놓치므로
+# 버튼은 'N만 이하' 만 두고, 구간은 직접 입력으로 받는다.
+PRICE_LIMITS = (70000, 100000, 150000, 200000, 300000, 500000)
 
 
 def price_keyboard():
-    """1박 가격대 선택 버튼."""
+    """1박 최대 가격 선택 버튼."""
     rows = []
-    for start in range(0, len(PRICE_CHOICES), 3):
-        rows.append([_button(price.short_label(low, high),
-                             f"price:pick:{low or ''}-{high or ''}")
-                     for low, high in PRICE_CHOICES[start:start + 3]])
+    for start in range(0, len(PRICE_LIMITS), 3):
+        rows.append([_button(price.short_label(None, high), f"price:pick:-{high}")
+                     for high in PRICE_LIMITS[start:start + 3]])
     rows.append([_button("💰 상관없음", "price:any")])
     rows.append([_button("✍️ 직접 입력", "price:type"), _button("✖️ 취소", "price:cancel")])
     return rows
@@ -141,8 +138,9 @@ def price_message(query, checkin, checkout, nights, guests):
     return (
         f"🏨 {query}\n"
         f"📅 {checkin} → {checkout} ({nights}박 · {guests}명)\n\n"
-        "💰 1박 가격대를 골라주세요.\n"
-        "그 가격대 안의 빈방만 알려드릴게요."
+        "💰 1박에 최대 얼마까지 괜찮으세요?\n"
+        "그 값 이하의 빈방만 알려드릴게요.\n"
+        "구간(예: 10~15만)으로 정하려면 '직접 입력'을 눌러주세요."
     )
 
 

@@ -90,9 +90,9 @@ def describe(low, high):
 
 
 def short_label(low, high):
-    """버튼에 쓸 짧은 표기: '~10만', '10~15만', '50만~'."""
+    """버튼에 쓸 짧은 표기: '15만 이하', '10~15만', '50만 이상'."""
     if low and high:
         return f"{_man(low)}~{_man(high)}만"
     if high:
-        return f"~{_man(high)}만"
-    return f"{_man(low)}만~"
+        return f"{_man(high)}만 이하"
+    return f"{_man(low)}만 이상"
