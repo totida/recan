@@ -199,21 +199,59 @@ def similarity(query, text):
     return sum(b.size for b in blocks) / len(nq), max(b.size for b in blocks)
 
 
+def _name_gaps(query, line):
+    """두 이름을 맞춰 보고 (가장 긴 일치 길이, 서로 다른 부분 [(찾는 쪽, 카드 쪽)])."""
+    blocks = [b for b in difflib.SequenceMatcher(None, query, line, autojunk=False)
+              .get_matching_blocks() if b.size >= SIMILARITY_MIN_PIECE]
+    gaps, i, j = [], 0, 0
+    for block in blocks + [difflib.Match(len(query), len(line), 0)]:
+        gaps.append((query[i:block.a], line[j:block.b]))
+        i, j = block.a + block.size, block.b + block.size
+    return max((b.size for b in blocks), default=0), gaps
+
+
+def branch_conflict(query, text):
+    """이름의 같은 자리에 다른 말이 있는가 — 같은 브랜드의 다른 지점.
+
+    체인 호텔은 브랜드가 같아서 '토요코인 서울강남'을 찾는데 '토요코인 서울영등포'나
+    '토요코인 부산서면'이 '토요코인'만으로 통과했다. 그대로 두면 다른 지점의
+    빈방을 알린다. '강남' 자리에 '영등포'가 있으면 다른 숙소로 본다.
+    찾는 쪽 말이 카드 어딘가(지역 줄 등)에 있으면 다른 지점이 아니다.
+    '비토애 산청' vs '비토애 럭셔리 글램핑 산청점' 처럼 말이 끼어든 것은 괜찮다.
+    """
+    nq, whole = normalize(query), normalize(text)
+    for line in (text or "").splitlines():
+        longest, gaps = _name_gaps(nq, normalize(line))
+        if longest < SIMILARITY_MIN_BLOCK:
+            continue  # 이름 줄이 아니다
+        for mine, theirs in gaps:
+            if mine.isdigit() and theirs.isdigit() and mine != theirs:
+                return True  # '동대문1' vs '동대문2'
+            if (len(mine) >= SIMILARITY_MIN_PIECE and len(theirs) >= SIMILARITY_MIN_PIECE
+                    and mine not in whole):
+                return True
+    return False
+
+
 def card_matches(query, text, threshold=0.6):
     """카드가 찾는 숙소인지 판단."""
     # 부킹닷컴은 모든 카드에 '15.3 miles from 스테이루헤' 처럼 기준 숙소
     # 이름을 적어둔다. 그 문구까지 보면 엉뚱한 카드가 전부 걸린다.
     text = DISTANCE_RE.sub(" ", text or "")
+    if _korean_name_matches(query, text, threshold):
+        return not branch_conflict(query, text)
+    return roman_matches(query, text)
+
+
+def _korean_name_matches(query, text, threshold):
     if match_score(query, text) >= threshold:
         return True
     ratio, longest = similarity(query, text)
     if ratio >= SIMILARITY_THRESHOLD and longest >= SIMILARITY_MIN_BLOCK:
         return True
     tokens = sorted(query_tokens(query), key=len, reverse=True)
-    if tokens and len(normalize(tokens[0])) >= 3:
-        if normalize(tokens[0]) in normalize(text):
-            return True
-    return roman_matches(query, text)
+    return bool(tokens and len(normalize(tokens[0])) >= 3
+                and normalize(tokens[0]) in normalize(text))
 
 
 def is_soldout(text):

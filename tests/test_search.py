@@ -458,6 +458,52 @@ class UrlTest(unittest.TestCase):
         self.assertIn("guest=4", url)
 
 
+class BranchTest(unittest.TestCase):
+    """체인 호텔: 브랜드만 같은 다른 지점은 같은 숙소가 아니다."""
+
+    def card(self, name, area="강남역 도보 5분", tail="90,000원"):
+        return f"비즈니스호텔\n{name}\n{area}\n{tail}"
+
+    def test_other_branches_are_rejected(self):
+        # '토요코인 서울동대문1' 은 가격비교 화면의 '함께 찾는 호텔' 에서 본 실제 이름
+        for name, area in (("토요코인 서울동대문1", "동대문역 도보 2분"),
+                           ("토요코인 서울영등포", "영등포역 도보 3분"),
+                           ("토요코인 부산서면", "서면역 도보 3분")):
+            self.assertFalse(search.card_matches("토요코인 서울강남", self.card(name, area)),
+                             name)
+
+    def test_numbered_branches_differ(self):
+        self.assertFalse(search.card_matches("토요코인 서울동대문1",
+                                             self.card("토요코인 서울동대문2")))
+
+    def test_same_branch_still_matches(self):
+        self.assertTrue(search.card_matches("토요코인 서울강남",
+                                            self.card("토요코인 서울강남")))
+        self.assertTrue(search.card_matches("토요코인 서울강남",
+                                            self.card("토요코인 서울강남호텔")))
+        self.assertTrue(search.card_matches(
+            "토요코인 서울강남", "Toyoko Inn Seoul Gangnam\nUnavailable\n"
+            "Too late – no availability for your selected dates at this property!"))
+
+    def test_other_region_of_the_same_brand(self):
+        # 비토애는 산청점·사천점이 따로 있다
+        self.assertFalse(search.card_matches("비토애 산청",
+                                             "사천 비토애풀빌라펜션&글램핑\n460,000원"))
+
+    def test_region_written_elsewhere_on_the_card_is_fine(self):
+        # 이름 줄에는 '산청'이 없어도 지역 줄에 있으면 같은 숙소다
+        self.assertTrue(search.card_matches(
+            "비토애 산청", "펜션\n산청 비토애럭셔리글램핑\n산청군 신안면\n예약마감"))
+
+    def test_branch_cards_do_not_alert(self):
+        cards = [{"text": self.card("토요코인 부산서면", "서면역 도보 3분", "89,000원"),
+                  "url": "https://x/1"}]
+        status, offers = search.analyze_cards("토요코인 서울강남", cards,
+                                              address="서울특별시 서초구 강남대로 323")
+        self.assertEqual(status, search.STATUS_NONE)
+        self.assertEqual(offers, [])
+
+
 if __name__ == "__main__":
     unittest.main()
 
@@ -589,8 +635,10 @@ class WrongPlaceTest(unittest.TestCase):
 
     def test_name_inserted_in_the_middle_still_matches(self):
         # 이름 중간에 단어가 끼어드는 경우는 계속 통해야 한다
+        # (예전 예시 '사천 비토애풀빌라펜션&글램핑'은 사천의 다른 지점이라
+        #  2026-10-20 지점 대조를 넣으면서 BranchTest 로 옮겼다)
         self.assertTrue(search.card_matches(
-            "비토애 산청", "사천 비토애풀빌라펜션&글램핑\n460,000원"))
+            "비토애 산청", "비토애 럭셔리 글램핑 산청점\n460,000원"))
 
     def test_other_city_is_dropped(self):
         cards = [{"text": "스테이루나 호텔\n경기 화성시 향남읍\n150,000원",
