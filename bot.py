@@ -1125,10 +1125,12 @@ def run_due_searches(db, now=None, today=None, browser=None, between=None,
             forced = bool(watch.get("force"))
             print(f"🔎 검색: {watch['query']} {watch['checkin']}~{watch['checkout']} "
                   f"(chat {mask(chat_id)})")
+            began = time.time()
             results = search.search_watch(browser, watch, sites, between=between)
             for result in results:
                 print(f"   - {result.name}: {result.status} "
                       f"({len(result.offers)}건) {result.note}")
+            print(f"   ⏱️ {time.time() - began:.0f}초")
 
             watch["last_searched"] = int(now)
             watch["force"] = False

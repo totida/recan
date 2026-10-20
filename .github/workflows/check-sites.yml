@@ -41,6 +41,8 @@ jobs:
           pip install -r requirements.txt
 
       - name: 사이트 점검
+        env:
+          PYTHONUNBUFFERED: '1'   # 줄마다 시각이 찍혀 사이트별로 걸린 시간을 볼 수 있다
         run: |
           python tools/check_sites.py \
             --query "${{ inputs.query }}" \
