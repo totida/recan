@@ -954,7 +954,11 @@ NAVER_ACCOMMODATION_ID_RE = re.compile(r"/(?:accommodation|domestic)/(\d{6,})")
 RATES_START_WORDS = ("1박 세금 포함", "가격 낮은순")
 RATES_END_WORDS = ("이 호텔을 본 다른 사람이", "함께 찾는 호텔", "실제 예약이 많은 호텔",
                    "추천 호텔 더보기")
-RATES_EMPTY_PHRASES = ("예약 가능한 객실이 없습니다", "예약 가능한 객실 없음")
+# 마감: 숙소 정보 바로 아래 붙는 표시. 숙소 정보까지 다 뜬 화면에만 있다(12/16·12/31 실측).
+RATES_SOLDOUT_BADGE = "예약 가능한 객실 없음"
+# 숙소 정보 없이 이 문구만 있는 짧은 화면은 1년 뒤 날짜에도 나온다. 화면이 덜 뜬 것일 수
+# 있어 마감으로 단정하지 않는다(같은 12/9 가 방 있음 → 짧은 화면 → 빈 화면으로 바뀌었다).
+RATES_EMPTY_PHRASE = "예약 가능한 객실이 없습니다"
 
 
 def naver_place_id(url):
@@ -989,14 +993,17 @@ def analyze_naver_rates(page_text, checkin, checkout):
     page_text = page_text or ""
     if len(page_text) < 100:
         return STATUS_UNKNOWN, ""
-    # 날짜가 화면에 반영됐는지 본다. 사이트가 날짜를 바꿔 보여주면 엉뚱한 날의 빈방이다.
+    # 날짜가 화면에 반영됐는지 본다. 사이트가 날짜를 바꿔 보여주거나 화면이 덜 뜨면
+    # 날짜가 없다. 그런 화면으로는 판정하지 않는다.
     if _rates_date(checkin) not in page_text or _rates_date(checkout) not in page_text:
-        return STATUS_UNKNOWN, "날짜가 반영되지 않았어요"
+        return STATUS_UNKNOWN, "가격비교 화면이 제대로 뜨지 않았어요"
     hotel_part = _cut_before(page_text, RATES_END_WORDS)
-    if any(phrase in hotel_part for phrase in RATES_EMPTY_PHRASES):
-        return STATUS_SOLDOUT, "예약 가능한 객실이 없어요"
     if find_price(naver_rates_section(page_text)):
         return STATUS_AVAILABLE, ""
+    if RATES_SOLDOUT_BADGE in hotel_part:
+        return STATUS_SOLDOUT, "예약 가능한 객실이 없어요"
+    if RATES_EMPTY_PHRASE in hotel_part:
+        return STATUS_UNKNOWN, "가격비교에 이 날짜 상품이 안 보여요"
     return STATUS_UNKNOWN, ""
 
 

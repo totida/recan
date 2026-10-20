@@ -36,7 +36,8 @@ RATES_OPEN = lines(
     "토요코인 서울동대문1 / 8.7 / 90,651원~ / 추천 호텔 더보기 / 실제 예약이 많은 호텔  / "
     "확인 해보세요! / 에이든 바이 베스트웨스턴 청담 / 8.6 / 149,827원~ / NAVER")
 
-# 10/20~10/21: 방이 없을 때의 짧은 화면 (숙소 이름도 안 나온다)
+# 10/20~10/21: 숙소 정보 없이 '예약 가능한 객실이 없습니다' 만 있는 짧은 화면.
+# 2027-09-01 처럼 1년 뒤 날짜에도 똑같이 나와서 마감인지 덜 뜬 것인지 알 수 없다.
 RATES_EMPTY_SHORT = lines(
     "Naver / 여행상품 / 여행정보 / 로그인 / 마이페이지 / 여행핫딜 / 항공 / 호텔 / 패키지 / For U / "
     "이전으로 이동 / 변경 / 더보기 / 요약 / 지도 / 10.20. 화 - 10.21. 수, 1박 / 성인2 / "
@@ -56,6 +57,14 @@ RATES_EMPTY_WITH_OTHERS = lines(
     "일정 변경 / 목적지 변경 / 이 호텔을 본 다른 사람이  / 함께 찾는 호텔이에요! / "
     "로컬스티치 크리에이터 타운 서교 / 8 / 118,260원~ / 호텔더디자이너스 리즈스윗 역삼 / 8.8 / "
     "237,492원~ / 88호텔 / 8.2 / 59,870원~ / 추천 호텔 더보기 / NAVER")
+
+# 12/09~12/10 을 04:24 에 다시 열었더니 숙소 정보도 날짜도 없는 화면이 나왔다
+# (같은 날짜가 02:38 에는 방 있음이었다).
+RATES_NOT_LOADED = lines(
+    "Naver / 여행상품 / 여행정보 / 마이페이지 / 여행핫딜 / 항공 / 호텔 / 패키지 / For U / 국내 호텔 / "
+    "detail / 내 주변 / 숙박일정을 선택하세요성인2 / 최근 30일 기준 세금 포함 최저가입니다 / "
+    "판매 사이트에서 숙소명, 위치, 가격 등을 재확인하세요. / 지도보기 / 로그아웃 / 전체서비스 / "
+    "공유하기 / 개인정보처리방침 / 이용약관 / 고객센터 / NAVER")
 
 SITE = {"key": "naver_hotels", "name": "네이버 호텔 가격비교",
         "rates_url": "https://hotels.naver.com/accommodation/search/detail/domestic/"
@@ -102,10 +111,16 @@ class AnalyzeRatesTest(unittest.TestCase):
         self.assertNotIn("토요코인 서울동대문1", section)
         self.assertNotIn("90,651원", section)
 
-    def test_short_empty_page_is_soldout(self):
+    def test_short_empty_page_is_not_called_soldout(self):
+        # 숙소 정보 없이 문구만 있는 화면으로는 마감이라고 단정하지 않는다
         status, note = search.analyze_naver_rates(RATES_EMPTY_SHORT, "2026-10-20", "2026-10-21")
-        self.assertEqual(status, search.STATUS_SOLDOUT)
-        self.assertIn("객실이 없어요", note)
+        self.assertEqual(status, search.STATUS_UNKNOWN)
+        self.assertIn("안 보여요", note)
+
+    def test_page_that_did_not_load(self):
+        status, note = search.analyze_naver_rates(RATES_NOT_LOADED, "2026-12-09", "2026-12-10")
+        self.assertEqual(status, search.STATUS_UNKNOWN)
+        self.assertIn("제대로 뜨지 않았어요", note)
 
     def test_empty_page_with_other_hotels_prices_is_soldout(self):
         # 이전 방식(페이지 전체에서 값 찾기)이었다면 118,260원을 이 숙소 값으로 읽었다
@@ -117,7 +132,7 @@ class AnalyzeRatesTest(unittest.TestCase):
     def test_dates_must_match(self):
         status, note = search.analyze_naver_rates(RATES_OPEN, "2026-12-10", "2026-12-11")
         self.assertEqual(status, search.STATUS_UNKNOWN)
-        self.assertIn("날짜", note)
+        self.assertIn("제대로 뜨지 않았어요", note)
 
     def test_place_id(self):
         self.assertEqual(search.naver_place_id(
