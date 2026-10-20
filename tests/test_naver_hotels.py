@@ -36,7 +36,8 @@ RATES_OPEN = lines(
     "토요코인 서울동대문1 / 8.7 / 90,651원~ / 추천 호텔 더보기 / 실제 예약이 많은 호텔  / "
     "확인 해보세요! / 에이든 바이 베스트웨스턴 청담 / 8.6 / 149,827원~ / NAVER")
 
-# 10/20~10/21: 방이 없을 때의 짧은 화면 (숙소 이름도 안 나온다)
+# 10/20~10/21: 숙소 정보 없이 '예약 가능한 객실이 없습니다' 만 있는 짧은 화면.
+# 2027-09-01 처럼 1년 뒤 날짜에도 똑같이 나와서 마감인지 덜 뜬 것인지 알 수 없다.
 RATES_EMPTY_SHORT = lines(
     "Naver / 여행상품 / 여행정보 / 로그인 / 마이페이지 / 여행핫딜 / 항공 / 호텔 / 패키지 / For U / "
     "이전으로 이동 / 변경 / 더보기 / 요약 / 지도 / 10.20. 화 - 10.21. 수, 1박 / 성인2 / "
@@ -56,6 +57,36 @@ RATES_EMPTY_WITH_OTHERS = lines(
     "일정 변경 / 목적지 변경 / 이 호텔을 본 다른 사람이  / 함께 찾는 호텔이에요! / "
     "로컬스티치 크리에이터 타운 서교 / 8 / 118,260원~ / 호텔더디자이너스 리즈스윗 역삼 / 8.8 / "
     "237,492원~ / 88호텔 / 8.2 / 59,870원~ / 추천 호텔 더보기 / NAVER")
+
+# 12/09~12/10 을 04:24 에 다시 열었더니 숙소 정보도 날짜도 없는 화면이 나왔다
+# (같은 날짜가 02:38 에는 방 있음이었다).
+RATES_NOT_LOADED = lines(
+    "Naver / 여행상품 / 여행정보 / 마이페이지 / 여행핫딜 / 항공 / 호텔 / 패키지 / For U / 국내 호텔 / "
+    "detail / 내 주변 / 숙박일정을 선택하세요성인2 / 최근 30일 기준 세금 포함 최저가입니다 / "
+    "판매 사이트에서 숙소명, 위치, 가격 등을 재확인하세요. / 지도보기 / 로그아웃 / 전체서비스 / "
+    "공유하기 / 개인정보처리방침 / 이용약관 / 고객센터 / NAVER")
+
+# 사용자 스크린샷: 11/03~11/04 성인 1 — Hotels.com 싱글룸 88,377원 등 방이 있는데 봇은 마감이라고 알렸다.
+# 같은 주소를 봇 쪽에서 1분 안에 세 번 열었더니 짧은 화면 → 방 목록 → 짧은 화면이었다.
+RATES_SHORT_1103 = lines(
+    "Naver / 여행상품 / 여행정보 / 로그인 / 마이페이지 / 여행핫딜 / 항공 / 호텔 / 패키지 / For U / "
+    "이전으로 이동 / 변경 / 더보기 / 요약 / 지도 / 11.03. 화 - 11.04. 수, 1박 / 성인1 / "
+    "예약 가능한 객실이 없습니다. / 일정 및 인원수 조건을 변경해주세요. / 일정 변경 / 인원수 변경 / "
+    "로그인 / 전체서비스 / 공유하기 / NAVER")
+RATES_OPEN_1103 = lines(
+    "Naver / 여행상품 / 여행정보 / 로그인 / 마이페이지 / 여행핫딜 / 항공 / 호텔 / 패키지 / For U / "
+    "이전으로 이동 / 토요코인 서울강남 / 변경 / 더보기 / 서울특별시서초구서초동 / 토요코인 서울강남3급 / "
+    "11.03.-11.04. (1박) / 88,377원 / 전체 가격 비교하기 / 88,377원~ / 11.03.화-11.04.수, 1박1명 / "
+    "전체 가격 비교하기 / 공유 / 무료 조식 서비스가 제공되는 가성비 좋은 호텔 / "
+    "서울 서초구 강남대로 323  위치길찾기거리뷰 / 요약 / 가격비교 / 사진 / 관련글 / 리뷰 / 지도 / "
+    "시설정보 / 4/9 / 11.03. 화 - 11.04. 수, 1박 / 성인1 / 조건 / 객실유형 / 여행사 / 전체 / "
+    "1박 최저가 추이 / 최저가 평균 13만원 / 가격 낮은순 / 1박 세금 포함 / "
+    "판매 사이트에서 숙소명, 위치, 가격 등을 재확인하세요. / 88,377원~ / 더보기 / 네이버페이 / "
+    "96,209원~ / 더보기 / 제공 / 트립어드바이저 / 광고 / 싱글룸, 금연 / 무료예약취소조식 / "
+    "무료취소 26.11.02.(월) 14:59 전까지 / 88,377원 / 싱글룸 / 무료예약취소조식 / "
+    "무료취소 26.11.02.(월) 14:59 전까지 / 97,900원 / 네이버페이 / 최대 4,895원 적립 / "
+    "트윈룸, 금연 / 무료예약취소조식 / 무료취소 26.11.02.(월) 14:59 전까지 / 114,195원 / "
+    "이 호텔을 본 다른 사람이  / 함께 찾는 호텔이에요! / 88호텔 / 8.2 / 59,870원~ / NAVER")
 
 SITE = {"key": "naver_hotels", "name": "네이버 호텔 가격비교",
         "rates_url": "https://hotels.naver.com/accommodation/search/detail/domestic/"
@@ -102,10 +133,16 @@ class AnalyzeRatesTest(unittest.TestCase):
         self.assertNotIn("토요코인 서울동대문1", section)
         self.assertNotIn("90,651원", section)
 
-    def test_short_empty_page_is_soldout(self):
+    def test_short_empty_page_is_not_called_soldout(self):
+        # 숙소 정보 없이 문구만 있는 화면으로는 마감이라고 단정하지 않는다
         status, note = search.analyze_naver_rates(RATES_EMPTY_SHORT, "2026-10-20", "2026-10-21")
-        self.assertEqual(status, search.STATUS_SOLDOUT)
-        self.assertIn("객실이 없어요", note)
+        self.assertEqual(status, search.STATUS_UNKNOWN)
+        self.assertIn("안 보여요", note)
+
+    def test_page_that_did_not_load(self):
+        status, note = search.analyze_naver_rates(RATES_NOT_LOADED, "2026-12-09", "2026-12-10")
+        self.assertEqual(status, search.STATUS_UNKNOWN)
+        self.assertIn("제대로 뜨지 않았어요", note)
 
     def test_empty_page_with_other_hotels_prices_is_soldout(self):
         # 이전 방식(페이지 전체에서 값 찾기)이었다면 118,260원을 이 숙소 값으로 읽었다
@@ -117,7 +154,7 @@ class AnalyzeRatesTest(unittest.TestCase):
     def test_dates_must_match(self):
         status, note = search.analyze_naver_rates(RATES_OPEN, "2026-12-10", "2026-12-11")
         self.assertEqual(status, search.STATUS_UNKNOWN)
-        self.assertIn("날짜", note)
+        self.assertIn("제대로 뜨지 않았어요", note)
 
     def test_place_id(self):
         self.assertEqual(search.naver_place_id(
@@ -126,6 +163,39 @@ class AnalyzeRatesTest(unittest.TestCase):
             "https://hotels.naver.com/accommodation/search/detail/domestic/1745414542/rates"),
             "1745414542")
         self.assertEqual(search.naver_place_id("https://example.com/1"), "")
+
+
+class FlakyPageTest(unittest.TestCase):
+    """봇 쪽에서 열면 짧은 화면이 섞여 나온다."""
+
+    def test_short_page_is_not_soldout(self):
+        # 이전 코드는 이 화면을 마감으로 읽어 사용자에게 '마감' 이라고 알렸다
+        status, _ = search.analyze_naver_rates(RATES_SHORT_1103, "2026-11-03", "2026-11-04")
+        self.assertEqual(status, search.STATUS_UNKNOWN)
+
+    def test_opens_again_until_rooms_show(self):
+        class Sequence:
+            def __init__(self, pages):
+                self.pages = list(pages)
+                self.opened = 0
+
+            def page_text(self, url, wait=10, scrolls=3):
+                self.opened += 1
+                return self.pages.pop(0)
+
+        item = watch("2026-11-03", "2026-11-04", guests=1)
+        browser = Sequence([RATES_SHORT_1103, RATES_OPEN_1103, RATES_SHORT_1103])
+        result = search.naver_rates_result(browser, item, SITE, "1745414542")
+        self.assertEqual(result.status, search.STATUS_AVAILABLE)
+        self.assertEqual(result.offers[0].price, "88,377원")
+        self.assertEqual(browser.opened, 2)          # 방 목록이 나오면 더 열지 않는다
+        self.assertIn("dAdultCnt=1", result.url)
+
+        browser = Sequence([RATES_SHORT_1103] * 3)
+        result = search.naver_rates_result(browser, item, SITE, "1745414542")
+        self.assertEqual(result.status, search.STATUS_UNKNOWN)
+        self.assertEqual(browser.opened, 3)
+        self.assertIn("3번 열어 봄", result.note)
 
 
 class RatesResultTest(unittest.TestCase):

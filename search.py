@@ -954,7 +954,11 @@ NAVER_ACCOMMODATION_ID_RE = re.compile(r"/(?:accommodation|domestic)/(\d{6,})")
 RATES_START_WORDS = ("1박 세금 포함", "가격 낮은순")
 RATES_END_WORDS = ("이 호텔을 본 다른 사람이", "함께 찾는 호텔", "실제 예약이 많은 호텔",
                    "추천 호텔 더보기")
-RATES_EMPTY_PHRASES = ("예약 가능한 객실이 없습니다", "예약 가능한 객실 없음")
+# 마감: 숙소 정보 바로 아래 붙는 표시. 숙소 정보까지 다 뜬 화면에만 있다(12/16·12/31 실측).
+RATES_SOLDOUT_BADGE = "예약 가능한 객실 없음"
+# 숙소 정보 없이 이 문구만 있는 짧은 화면은 1년 뒤 날짜에도 나온다. 화면이 덜 뜬 것일 수
+# 있어 마감으로 단정하지 않는다(같은 12/9 가 방 있음 → 짧은 화면 → 빈 화면으로 바뀌었다).
+RATES_EMPTY_PHRASE = "예약 가능한 객실이 없습니다"
 
 
 def naver_place_id(url):
@@ -989,14 +993,17 @@ def analyze_naver_rates(page_text, checkin, checkout):
     page_text = page_text or ""
     if len(page_text) < 100:
         return STATUS_UNKNOWN, ""
-    # 날짜가 화면에 반영됐는지 본다. 사이트가 날짜를 바꿔 보여주면 엉뚱한 날의 빈방이다.
+    # 날짜가 화면에 반영됐는지 본다. 사이트가 날짜를 바꿔 보여주거나 화면이 덜 뜨면
+    # 날짜가 없다. 그런 화면으로는 판정하지 않는다.
     if _rates_date(checkin) not in page_text or _rates_date(checkout) not in page_text:
-        return STATUS_UNKNOWN, "날짜가 반영되지 않았어요"
+        return STATUS_UNKNOWN, "가격비교 화면이 제대로 뜨지 않았어요"
     hotel_part = _cut_before(page_text, RATES_END_WORDS)
-    if any(phrase in hotel_part for phrase in RATES_EMPTY_PHRASES):
-        return STATUS_SOLDOUT, "예약 가능한 객실이 없어요"
     if find_price(naver_rates_section(page_text)):
         return STATUS_AVAILABLE, ""
+    if RATES_SOLDOUT_BADGE in hotel_part:
+        return STATUS_SOLDOUT, "예약 가능한 객실이 없어요"
+    if RATES_EMPTY_PHRASE in hotel_part:
+        return STATUS_UNKNOWN, "가격비교에 이 날짜 상품이 안 보여요"
     return STATUS_UNKNOWN, ""
 
 
@@ -1005,19 +1012,29 @@ def naver_rates_url(template, place_id, watch):
                            checkout=watch["checkout"], guests=watch.get("guests", 2))
 
 
-def naver_rates_result(browser, watch, site, place_id):
+# 봇 쪽에서 열면 숙소 정보 없는 짧은 화면이 자주 나온다. 같은 주소를 1분 안에 세 번 열었더니
+# 짧은 화면 → 방 목록(88,377원) → 짧은 화면이었다(2026-10-20 실측). 판정이 안 나면 다시 연다.
+RATES_TRIES = 3
+
+
+def naver_rates_result(browser, watch, site, place_id, tries=RATES_TRIES):
     """네이버 호텔 가격비교 화면을 열어 그 날짜에 방이 있는지 본다."""
     if not place_id:
         return SiteResult(site["key"], site["name"], STATUS_NONE,
                           note="네이버에서 숙소를 찾지 못해 가격비교를 열 수 없어요")
     url = naver_rates_url(site["rates_url"], place_id, watch)
-    try:
-        page = browser.page_text(url)
-    except Exception as exc:  # noqa: BLE001
-        return SiteResult(site["key"], site["name"], STATUS_ERROR, url,
-                          note=str(exc).splitlines()[0][:120])
+    for attempt in range(1, tries + 1):
+        try:
+            page = browser.page_text(url)
+        except Exception as exc:  # noqa: BLE001
+            return SiteResult(site["key"], site["name"], STATUS_ERROR, url,
+                              note=str(exc).splitlines()[0][:120])
+        status, note = analyze_naver_rates(page, watch["checkin"], watch["checkout"])
+        if status != STATUS_UNKNOWN:
+            break
+    if status == STATUS_UNKNOWN and note:
+        note = f"{note} ({tries}번 열어 봄)"
 
-    status, note = analyze_naver_rates(page, watch["checkin"], watch["checkout"])
     section = naver_rates_section(page)
     budget = watch_budget(watch)
     if (status == STATUS_AVAILABLE and budget
@@ -1351,30 +1368,49 @@ def _search_site(browser, watch, site):
     return result
 
 
-def search_watch(browser, watch, sites=None, after_site=None):
+class _AnswerBetweenPages:
+    """페이지를 새로 열기 직전마다 between() 을 불러 텔레그램 입력을 받는다.
+
+    예전에는 사이트 사이에서만 받았다. 여기어때는 검색 주소를 4개까지 시도하고
+    없는 숙소면 주소마다 16초쯤 기다려서, 그동안 1분 넘게 버튼이 먹통이었다.
+    새 페이지를 열기 직전이면 브라우저를 잠깐 다른 일(숙소 이름 찾기)에 써도
+    곧 새 페이지로 덮이므로 안전하다. 읽어 온 카드는 이미 글자로 받아 둔 상태다.
+    """
+
+    def __init__(self, browser, between):
+        self._browser = browser
+        self._between = between
+
+    def collect_cards(self, *args, **kwargs):
+        self._between()
+        return self._browser.collect_cards(*args, **kwargs)
+
+    def page_text(self, *args, **kwargs):
+        self._between()
+        return self._browser.page_text(*args, **kwargs)
+
+    def __getattr__(self, name):
+        return getattr(self._browser, name)
+
+
+def search_watch(browser, watch, sites=None, between=None):
     """감시 항목 하나에 대해 모든 사이트를 검색.
 
-    after_site 를 주면 사이트 하나를 끝낼 때마다 불러준다. 검색 한 바퀴가
+    between 을 주면 페이지를 새로 열기 직전마다 불러준다. 검색 한 바퀴가
     길어도 그 사이에 텔레그램 입력을 처리해 봇이 먹통으로 보이지 않게 한다.
-    사이트 사이에서만 부르므로, 다음 사이트는 어차피 페이지를 새로 열어
-    브라우저를 같이 써도 문제가 없다.
     """
     sites = sites if sites is not None else load_sites()
     results = []
-
-    def done():
-        if after_site:
-            after_site()
+    if between:
+        browser = _AnswerBetweenPages(browser, between)
 
     registered = watch.get("url") or ""
     if "naver" in registered:
         results.append(naver_detail_result(browser, watch, registered,
                                            "네이버 예약(등록 링크)"))
-        done()
 
     if watch.get("triple"):
         results.append(triple_detail_result(browser, watch, watch["triple"]))
-        done()
 
     rates_sites = [site for site in sites if site.get("rates_url")]
     for site in sites:
@@ -1383,7 +1419,6 @@ def search_watch(browser, watch, sites=None, after_site=None):
         if "naver" in registered and site["key"] == "naver":
             continue  # 상세 링크로 이미 확인함
         results.append(_search_site(browser, watch, site))
-        done()
 
     # 가격비교는 여러 여행사를 모아 보여주므로 결과 맨 위에 둔다.
     place_id = naver_place_id(registered) or watch.get("naver_place_id", "")
@@ -1393,5 +1428,4 @@ def search_watch(browser, watch, sites=None, after_site=None):
             results.insert(0, rates)
         else:
             results.append(rates)
-        done()
     return results

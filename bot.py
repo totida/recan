@@ -59,8 +59,15 @@ UNKNOWN_NOTE = "숙소는 찾았지만 가격 표시가 없어 판정 보류 · 
 # 두어, 숙소 이름을 넣었을 때 크롬이 새로 뜨는 시간을 기다리지 않게 한다.
 BROWSER_IDLE = int(os.environ.get("BROWSER_IDLE_SEC", "300"))
 
-# 등록을 하다 말고 이만큼 지나면, 다음 메시지는 새 요청으로 본다.
-STATE_TTL = int(os.environ.get("STATE_TTL_MIN", "30")) * 60
+# 마지막 입력 뒤 이만큼은 '대화 중'으로 보고 새 검색을 시작하지 않는다.
+# 등록하며 버튼을 연달아 누르는 동안 검색이 끼어들면 버튼마다 수십 초씩 늦어진다.
+CHAT_QUIET = int(os.environ.get("CHAT_QUIET_SEC", "30"))
+
+# 등록을 하다 말고 이만큼 입력이 없으면, 다음 글은 처음(숙소 찾기)부터 다시 본다.
+# 버튼은 무엇을 누른 건지 분명하므로 시간이 지나도 이어서 받는다.
+STATE_TTL = int(os.environ.get("STATE_TTL_SEC", "60"))
+# 숙소 이름이 아니라 앞 단계에 대한 대답으로 보이는 말에서 걷어낼 단위
+ANSWER_UNIT_RE = re.compile(r"명|인|만|원|이하|이상|박|월|일")
 
 SKIP_WORDS = ("건너뛰기", "건너뜀", "스킵", "skip", "모름", "몰라", "패스")
 NONE_WORDS = ("없음", "없어요", "없어", "직접", "직접입력", "기타")
@@ -288,6 +295,20 @@ def _looks_like_new_name(text):
     """
     text = (text or "").strip()
     return len(text) >= 2 and len(text) <= 60 and not any(c.isdigit() for c in text)
+
+
+def _looks_like_answer(text):
+    """숙소 이름이 아니라 앞 단계에 대한 대답처럼 보이는가. ('4', '15만 이하', '예', '5/2~5/3')"""
+    word = re.sub(r"\s", "", (text or "").lower())
+    if word in YES_WORDS + NO_WORDS + SKIP_WORDS + NONE_WORDS + ANY_PRICE_WORDS:
+        return True
+    return len(re.findall(r"[가-힣a-z]", ANSWER_UNIT_RE.sub("", word))) < 2
+
+
+def _restart_text():
+    wait = f"{STATE_TTL // 60}분" if STATE_TTL >= 60 else f"{STATE_TTL}초"
+    return (f"⏰ {wait} 넘게 입력이 없어서 처음부터 다시 할게요.\n"
+            "🏨 숙소 이름을 보내주세요. (예: 비토애 산청)")
 
 
 def _object_particle(word):
@@ -689,7 +710,10 @@ def handle_text(db, chat_id, text, today=None, lookup=None):
 
     state = chat.get("state") or {}
     if state and time.time() - state.get("touched_at", 0) > STATE_TTL:
-        chat["state"] = state = {}   # 하다 만 등록은 잊는다
+        chat["state"], state = None, {}   # 하다 만 등록은 잊고 숙소 찾기부터
+        if _looks_like_answer(text):
+            # '4'·'15만 이하' 같은 대답을 숙소 이름으로 검색하지 않게 알려만 준다
+            return [reply(_restart_text())]
     elif state:
         state["touched_at"] = int(time.time())
     step = state.get("step")
@@ -858,6 +882,7 @@ def handle_callback(db, chat_id, data, today=None):
 
     if not state:
         return [reply("진행 중인 등록이 없어요. 숙소 이름을 다시 보내주세요.")]
+    state["touched_at"] = int(time.time())   # 버튼을 누르는 동안은 계속 등록 중이다
 
     if action == "triple":
         if kind == "pick" and value.isdigit():
@@ -1093,7 +1118,13 @@ def _collect_due(db, now, today):
     return due, notices
 
 
-def run_due_searches(db, now=None, today=None, browser=None, between=None):
+def run_due_searches(db, now=None, today=None, browser=None, between=None,
+                     chatting=None):
+    """검색할 때가 된 항목을 검색해 알린다.
+
+    between: 페이지를 새로 열기 직전마다 불러 텔레그램 입력을 받는다.
+    chatting: 참이면 사용자가 대화 중이다. 남은 항목 검색은 다음 바퀴로 미룬다.
+    """
     now = now or time.time()
     today = today or dateparse.today_kst()
     due, notices = _collect_due(db, now, today)
@@ -1109,14 +1140,18 @@ def run_due_searches(db, now=None, today=None, browser=None, between=None):
     browser = browser or search.Browser()
     try:
         for chat_id, watch in due:
+            if chatting and chatting():
+                print("💬 대화 중이라 남은 검색은 다음 바퀴로 미룹니다")
+                break
             forced = bool(watch.get("force"))
             print(f"🔎 검색: {watch['query']} {watch['checkin']}~{watch['checkout']} "
                   f"(chat {mask(chat_id)})")
-            results = search.search_watch(browser, watch, sites,
-                                          after_site=between)
+            began = time.time()
+            results = search.search_watch(browser, watch, sites, between=between)
             for result in results:
                 print(f"   - {result.name}: {result.status} "
                       f"({len(result.offers)}건) {result.note}")
+            print(f"   ⏱️ {time.time() - began:.0f}초")
 
             watch["last_searched"] = int(now)
             watch["force"] = False
@@ -1169,11 +1204,17 @@ def main():
             if process_updates(db, browser, timeout=0):
                 seen["activity"] = time.time()
 
+        def chatting():
+            last = seen["activity"]
+            return last is not None and time.time() - last < CHAT_QUIET
+
         while True:
             handled = process_updates(db, browser, timeout=timeout)
             if handled:
                 seen["activity"] = time.time()
-            searched = run_due_searches(db, browser=browser, between=pump)
+            searched = (False if chatting() else
+                        run_due_searches(db, browser=browser, between=pump,
+                                         chatting=chatting))
             storage.save_db(db)
             storage.persist()
 
