@@ -1249,6 +1249,32 @@ class PriceRangeTest(unittest.TestCase):
         replies = self.say("가격 30")          # 알림이 하나면 번호 없이
         self.assertIn("1박 30만원 이하", texts(replies))
 
+    def test_one_line_amount_without_ihha_is_explained(self):
+        # 한 줄 입력에서는 '이하'가 있어야 한다. 없으면 이름에 섞이지 않게 안내만 한다.
+        for line in ("비토애 산청 5/2~5/3 28만", "비토애 산청 5/2~5/3 2명 280,000원"):
+            replies = self.say(line)
+            self.assertIn("'이하'를 붙여서", texts(replies), line)
+            self.assertIsNone(self.state(), line)
+        self.say("비토애 산청 5/2~5/3 2명 28만 이하")
+        self.assertEqual(self.state()["query"], "비토애 산청")
+        self.assertEqual(self.state()["price_max"], 280000)
+
+    def test_help_mentions_ihha_and_range(self):
+        help_text = texts(self.say("도움말"))
+        self.assertIn("28만 이하", help_text)
+        self.assertIn("10~15만", help_text)
+
+    def test_type_button_explains_max_and_range(self):
+        self.say("비토애 산청 5/2~5/3 2명")
+        self.say("경남 산청군")
+        guide = texts(self.tap("price:type"))
+        self.assertIn("최대 가격: 28만", guide)
+        self.assertIn("구간: 10~15만", guide)
+        self.assertIn("더 싼 방은 안 알려요", guide)
+        self.say("10~15만")                     # 안내대로 구간을 보내면
+        self.assertEqual((self.state()["price_min"], self.state()["price_max"]),
+                         (100000, 150000))
+
     def test_unreadable_price_asks_again(self):
         self.say("비토애 산청 5/2~5/3 2명")
         self.say("경남 산청군")
