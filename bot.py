@@ -69,8 +69,15 @@ YES_WORDS = ("예", "네", "넹", "ㅇ", "ㅇㅇ", "응", "yes", "y", "ok", "확
 NO_WORDS = ("아니오", "아니요", "아뇨", "아니", "ㄴ", "no", "n", "틀려", "틀렸어요", "다시")
 ANY_PRICE_WORDS = SKIP_WORDS + ("상관없음", "상관없어", "상관없어요", "무관", "아무거나",
                                 "없음", "제한없음", "전체")
-PRICE_HELP = ("가격대를 이렇게 보내주세요. (1박 기준)\n"
-              "예) 10~15만 · 15만 이하 · 10만 이상\n"
+# 한 줄 입력에 '이하'·구간 없이 금액만 적은 것 ('비토애 산청 5/2~5/3 28만')
+LONE_AMOUNT_RE = re.compile(r"\d+(?:\.\d+)?\s*만\s*원?|\d{1,3}(?:,\d{3})+\s*원")
+ONE_LINE_PRICE_HELP = ("가격은 '28만 이하'처럼 '이하'를 붙여서 보내주세요. (구간은 '10~15만')\n"
+                       "예) 비토애 산청 5/2~5/3 2명 28만 이하\n"
+                       "숙소 이름만 보내셔도 가격은 나중에 버튼으로 고를 수 있어요.")
+PRICE_HELP = ("💰 1박 가격대를 이렇게 보내주세요.\n"
+              "• 최대 가격: 28만 (또는 28만 이하) → 28만원 이하 방\n"
+              "• 구간: 10~15만 → 10만~15만원 방만 (더 싼 방은 안 알려요)\n"
+              "• 최소 가격: 10만 이상\n"
               "상관없으면 '상관없음'.")
 
 HELP_TEXT = (
@@ -81,11 +88,14 @@ HELP_TEXT = (
     "2️⃣ 네이버에서 찾은 숙소 후보를 주소와 함께 보여드릴게요. 버튼으로 고르시면 돼요.\n"
     "3️⃣ 오늘 날짜 기준 달력에서 체크인 · 체크아웃 날짜를 눌러주세요.\n"
     "    이어서 인원을 고르면 그 인원이 묵을 수 있는 객실만 찾아드려요.\n"
-    "    1박 가격대(예: 10~15만)를 고르면 그 가격대 안의 빈방만 알려드려요.\n"
+    "    1박 최대 가격(예: 15만 이하)을 고르면 그 값 이하의 빈방만 알려드려요.\n"
+    "    구간은 '직접 입력'에서 10~15만 처럼 보내면 돼요. (더 싼 방은 안 알려요)\n"
     "4️⃣ 켜져 있는 예약 사이트를 주기적으로 검색해서\n"
     "    예약 가능한 방이 보이면 바로 알려드려요.\n"
     "    (고르신 주소로 같은 숙소가 맞는지 검색 결과를 다시 대조합니다)\n\n"
     "날짜는 버튼 대신 직접 입력해도 됩니다: 5/2~5/3, 내일 2박, 이번주말\n"
+    "한 줄로 보낼 때 가격은 '이하'를 붙이거나 구간으로 적어주세요:\n"
+    "  비토애 산청 5/2~5/3 2명 28만 이하 / 비토애 산청 5/2~5/3 2명 10~15만\n"
     "네이버 숙소 링크를 붙여넣어도 등록돼요.\n"
     "인터파크 트리플은 이름으로 검색이 안 돼요. 트리플 숙소 링크를 보내주시면\n"
     "그 숙소에 연결해 두고 날짜·인원을 바꿔가며 함께 확인해 드려요.\n\n"
@@ -93,7 +103,7 @@ HELP_TEXT = (
     "  목록 — 등록된 알림 보기\n"
     "  삭제 2 — 2번 알림 삭제 (삭제 전체 = 모두 삭제)\n"
     "  인원 2 4 — 2번 알림을 4명으로 변경\n"
-    "  가격 2 10~15만 — 2번 알림의 1박 가격대 변경 (상관없음 = 제한 없앰)\n"
+    "  가격 2 15만 이하 — 2번 알림의 1박 가격대 변경 (10~15만 · 상관없음도 됨)\n"
     "  지금 — 기다리지 않고 바로 검색\n"
     "  취소 — 입력 중이던 등록 취소\n"
     "  내아이디 — 이 대화의 채팅 ID 보기\n"
@@ -150,7 +160,7 @@ def format_report(watch, results, header=""):
         if result.status == search.STATUS_UNKNOWN and not note:
             note = UNKNOWN_NOTE
         if result.status == search.STATUS_OVER_BUDGET and not note:
-            note = f"{price_text(watch)} 안에는 빈방이 없어요"
+            note = f"{price_text(watch)} 빈방은 없어요"
         suffix = f" — {note}" if note else ""
         lines.append(f"{icon} {result.name} · {label}{suffix}")
         for offer in result.offers:
@@ -320,7 +330,7 @@ def register_watch(chat, query, checkin, checkout, guests, url=None, address="",
     chat["watches"].append(watch)
     nights = dateparse.nights_between(ci, co)
     budget = price_text(watch)
-    budget_line = f"💰 {budget} 안의 빈방만 알려드려요\n" if budget else ""
+    budget_line = f"💰 {budget} 빈방만 알려드려요\n" if budget else ""
     sites, minutes = site_summary()
     address_line = f"📍 {address}\n" if address else ""
     keyword_line = (f"🔎 검색어: {keyword}\n"
@@ -797,6 +807,9 @@ def handle_text(db, chat_id, text, today=None, lookup=None):
 
     name = parsed["name"].strip()
     guests = parsed["guests"]   # 안 적었으면 None → 나중에 버튼으로 물어본다
+    if not parsed["price"] and LONE_AMOUNT_RE.search(name):
+        # 이하·구간 없는 금액은 숙소 이름에 섞여 들어가므로 다시 보내 달라고 한다
+        return [reply(ONE_LINE_PRICE_HELP)]
     if not name:
         return [reply("숙소 이름을 함께 알려주세요. (예: 비토애 산청 5/2~5/3)")]
     if len(name) > 60:

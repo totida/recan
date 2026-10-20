@@ -4,6 +4,7 @@
     10~15만, 10만~15만원, 100,000~150,000원
     15만 이하, ~15만, 최대 15만
     10만 이상, 10만~, 최소 10만
+    28만, 28 (가격을 묻는 자리에서만 — '최대 얼마까지'에 대한 답이라 그 값 이하)
 """
 
 import re
@@ -26,6 +27,8 @@ _UPPER_RES = (
     re.compile(rf"{_BEFORE}(?P<n>{_NUM})\s*(?P<u>{_UNIT})?\s*(?:이하|미만|까지|아래)"),
     re.compile(rf"(?:{_DASH}|최대|최고)\s*(?P<n>{_NUM})\s*(?P<u>{_UNIT})?{_AFTER}"),
 )
+# 가격을 묻는 자리에 금액 하나만 보낸 경우
+_SINGLE_RE = re.compile(rf"(?P<n>{_NUM})\s*(?P<u>{_UNIT})?")
 _LOWER_RES = (
     re.compile(rf"{_BEFORE}(?P<n>{_NUM})\s*(?P<u>{_UNIT})?\s*"
                rf"(?:이상|넘는|초과|부터|{_DASH}(?!\s*\d))"),
@@ -71,6 +74,13 @@ def parse_range(text, bare=False):
                 if value:
                     span = match.span()
                     return (None, value, span) if upper else (value, None, span)
+    # '최대 얼마까지 괜찮으세요?' 에 '28만' 이라고만 답하면 28만 이하다.
+    # 숙소 이름과 함께 적은 줄에서는 다른 숫자와 헷갈리므로 받지 않는다.
+    single = _SINGLE_RE.fullmatch(text.strip()) if bare else None
+    if single:
+        value = _won(single.group("n"), single.group("u"), bare)
+        if value:
+            return None, value, (0, len(text))
     return None
 
 
@@ -90,9 +100,9 @@ def describe(low, high):
 
 
 def short_label(low, high):
-    """버튼에 쓸 짧은 표기: '~10만', '10~15만', '50만~'."""
+    """버튼에 쓸 짧은 표기: '15만 이하', '10~15만', '50만 이상'."""
     if low and high:
         return f"{_man(low)}~{_man(high)}만"
     if high:
-        return f"~{_man(high)}만"
-    return f"{_man(low)}만~"
+        return f"{_man(high)}만 이하"
+    return f"{_man(low)}만 이상"

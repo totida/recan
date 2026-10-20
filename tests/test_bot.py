@@ -144,19 +144,22 @@ class ConversationTest(unittest.TestCase):
         self.assertIn("guests:pick:4", buttons(replies))
 
         replies = self.tap("guests:pick:4")
-        self.assertIn("1박 가격대를 골라주세요", texts(replies))
-        self.assertIn("price:pick:100000-150000", buttons(replies))
+        self.assertIn("최대 얼마까지", texts(replies))
+        self.assertIn("price:pick:-150000", buttons(replies))
         self.assertIn("price:any", buttons(replies))
+        # 구간 버튼은 더 싼 방을 놓치므로 버튼은 'N만 이하' 뿐이다
+        self.assertFalse([b for b in buttons(replies)
+                          if b.startswith("price:pick:") and not b.startswith("price:pick:-")])
 
-        replies = self.tap("price:pick:100000-150000")
+        replies = self.tap("price:pick:-150000")
         self.assertIn("등록 완료", texts(replies))
-        self.assertIn("1박 10~15만원", texts(replies))
+        self.assertIn("1박 15만원 이하", texts(replies))
         self.assertIsNone(self.state())
 
         watch = self.watches()[0]
         self.assertEqual(watch["query"], "비토애 산청")
         self.assertEqual(watch["guests"], 4)
-        self.assertEqual((watch["price_min"], watch["price_max"]), (100000, 150000))
+        self.assertEqual((watch["price_min"], watch["price_max"]), (None, 150000))
         self.assertEqual(watch["address"], CANDIDATES[0]["address"])
         self.assertEqual(watch["url"], CANDIDATES[0]["url"])
         self.assertEqual((watch["checkin"], watch["checkout"]), ("2026-05-02", "2026-05-04"))
@@ -1237,6 +1240,41 @@ class PriceRangeTest(unittest.TestCase):
         watch = self.watches()[0]
         self.assertEqual((watch["price_min"], watch["price_max"]), (100000, 150000))
 
+    def test_a_bare_number_is_the_maximum(self):
+        for answer in ("28만", "28"):
+            self.setUp()
+            self.register("비토애 산청 5/2~5/3", price_answer=answer)
+            watch = self.watches()[0]
+            self.assertEqual((watch["price_min"], watch["price_max"]), (None, 280000), answer)
+        replies = self.say("가격 30")          # 알림이 하나면 번호 없이
+        self.assertIn("1박 30만원 이하", texts(replies))
+
+    def test_one_line_amount_without_ihha_is_explained(self):
+        # 한 줄 입력에서는 '이하'가 있어야 한다. 없으면 이름에 섞이지 않게 안내만 한다.
+        for line in ("비토애 산청 5/2~5/3 28만", "비토애 산청 5/2~5/3 2명 280,000원"):
+            replies = self.say(line)
+            self.assertIn("'이하'를 붙여서", texts(replies), line)
+            self.assertIsNone(self.state(), line)
+        self.say("비토애 산청 5/2~5/3 2명 28만 이하")
+        self.assertEqual(self.state()["query"], "비토애 산청")
+        self.assertEqual(self.state()["price_max"], 280000)
+
+    def test_help_mentions_ihha_and_range(self):
+        help_text = texts(self.say("도움말"))
+        self.assertIn("28만 이하", help_text)
+        self.assertIn("10~15만", help_text)
+
+    def test_type_button_explains_max_and_range(self):
+        self.say("비토애 산청 5/2~5/3 2명")
+        self.say("경남 산청군")
+        guide = texts(self.tap("price:type"))
+        self.assertIn("최대 가격: 28만", guide)
+        self.assertIn("구간: 10~15만", guide)
+        self.assertIn("더 싼 방은 안 알려요", guide)
+        self.say("10~15만")                     # 안내대로 구간을 보내면
+        self.assertEqual((self.state()["price_min"], self.state()["price_max"]),
+                         (100000, 150000))
+
     def test_unreadable_price_asks_again(self):
         self.say("비토애 산청 5/2~5/3 2명")
         self.say("경남 산청군")
@@ -1314,7 +1352,7 @@ class PriceRangeTest(unittest.TestCase):
         self.assertNotIn("예약 가능한 방을 찾았어요", fake.text())
         self.assertIn("💸", fake.text())
         self.assertIn("가격대 밖", fake.text())
-        self.assertIn("1박 15만원 이하 안에는 빈방이 없어요", fake.text())
+        self.assertIn("1박 15만원 이하 빈방은 없어요", fake.text())
 
     def test_place_named_yesan_is_not_a_command(self):
         # 예산군은 지역 이름이다. '예산 스플라스 리솜' 은 숙소 등록이어야 한다.
