@@ -1001,7 +1001,6 @@ class StayAwakeDuringSearchTest(unittest.TestCase):
         chat = storage.get_chat(self.db, CHAT)
         chat["watches"].append(storage.new_watch("소노벨 변산", "2026-05-02", "2026-05-03",
                                                  2, address="전북 부안군 변산면"))
-        chat["watches"][1]["force"] = True
         talking = {"now": False}
 
         def between():
@@ -1009,10 +1008,55 @@ class StayAwakeDuringSearchTest(unittest.TestCase):
 
         with FakeTelegram():
             bot.run_due_searches(self.db, browser=self.CountingBrowser(), today=TODAY,
-                                 between=between, chatting=lambda: talking["now"])
+                                 between=between,
+                                 chatting=lambda forced=False: talking["now"] and not forced)
         self.assertFalse(chat["watches"][0]["force"])      # 첫 숙소는 끝까지 검색
-        self.assertTrue(chat["watches"][1]["force"])       # 두 번째는 다음 바퀴로
-        self.assertEqual(chat["watches"][1]["last_searched"], 0)
+        self.assertEqual(chat["watches"][1]["last_searched"], 0)   # 두 번째는 다음 바퀴로
+
+    def test_now_during_a_search_is_answered(self):
+        # 실제로 겪은 일: '지금'을 보냈는데 그때 검색 중이던 숙소는 결과가 안 왔다
+        self.watch["force"] = False                        # 정해진 주기로 검색하던 중
+        self.watch["last_searched"] = 0
+
+        def user_says_now():
+            bot.handle_text(self.db, CHAT, "지금", today=TODAY)
+
+        # 빈방이 없을 때다. 빈방이 있으면 '지금'이 아니어도 원래 알린다.
+        soldout = self.CountingBrowser(cards=[{"text": "비토애 산청\n산청군 시천면\n예약마감",
+                                               "url": "https://x/1"}])
+        with FakeTelegram() as fake:
+            bot.run_due_searches(self.db, browser=soldout, today=TODAY,
+                                 between=user_says_now)
+        self.assertIn("요청하신 검색 결과", fake.text())   # 결과를 보냈다
+        self.assertFalse(self.watch["force"])
+
+    def test_now_is_searched_first_and_not_held_back(self):
+        chat = storage.get_chat(self.db, CHAT)
+        later = storage.new_watch("소노벨 변산", "2026-05-02", "2026-05-03", 2,
+                                  address="전북 부안군 변산면")
+        chat["watches"].insert(0, later)                  # 주기 검색 대상이 앞에 있어도
+        self.watch["force"] = True                         # '지금'으로 부른 숙소가 먼저
+        order = []
+
+        class Recording(self.CountingBrowser):
+            def collect_cards(inner, url, *args, **kwargs):
+                order.append(url)
+                return super().collect_cards(url, *args, **kwargs)
+
+        with FakeTelegram():
+            bot.run_due_searches(self.db, browser=Recording(), today=TODAY,
+                                 chatting=lambda forced=False: not forced)
+        self.assertFalse(self.watch["force"])              # 대화 중이어도 직접 부른 건 검색
+        self.assertEqual(later["last_searched"], 0)        # 주기 검색은 미룸
+        self.assertTrue(order)
+
+    def test_now_tells_how_long(self):
+        chat = storage.get_chat(self.db, CHAT)
+        chat["watches"].append(storage.new_watch("소노벨 변산", "2026-05-02", "2026-05-03"))
+        chat["watches"].append(storage.new_watch("라한셀렉트 경주", "2026-05-02", "2026-05-03"))
+        replies = bot.handle_text(self.db, CHAT, "지금", today=TODAY)
+        self.assertIn("숙소 3곳", texts(replies))
+        self.assertIn("9분", texts(replies))
 
     def test_works_without_the_hook(self):
         with FakeTelegram() as fake:
