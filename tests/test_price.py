@@ -61,9 +61,15 @@ class ParseRangeTest(unittest.TestCase):
             self.assertIsNone(price.parse_range(text), text)
             self.assertIsNone(price.parse_range(text, bare=True), text)
 
-    def test_a_single_amount_is_not_a_range(self):
-        self.assertIsNone(price.parse_range("15", bare=True))
+    def test_a_single_amount_is_the_maximum_when_asked_for_a_price(self):
+        # '최대 얼마까지 괜찮으세요?' 에 대한 답
+        self.check("28만", (None, 280000), bare=True)
+        self.check("28", (None, 280000), bare=True)
+        self.check("280,000원", (None, 280000), bare=True)
+        # 숙소 이름과 함께 적은 줄에서는 금액 하나를 가격대로 보지 않는다
         self.assertIsNone(price.parse_range("15만"))
+        self.assertIsNone(price.parse_range("비토애 산청 28만", bare=True))
+        self.assertIsNone(price.parse_range("20260502", bare=True))
 
     def test_describe(self):
         self.assertEqual(price.describe(100000, 150000), "10~15만원")

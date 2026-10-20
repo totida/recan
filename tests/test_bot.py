@@ -1240,6 +1240,15 @@ class PriceRangeTest(unittest.TestCase):
         watch = self.watches()[0]
         self.assertEqual((watch["price_min"], watch["price_max"]), (100000, 150000))
 
+    def test_a_bare_number_is_the_maximum(self):
+        for answer in ("28만", "28"):
+            self.setUp()
+            self.register("비토애 산청 5/2~5/3", price_answer=answer)
+            watch = self.watches()[0]
+            self.assertEqual((watch["price_min"], watch["price_max"]), (None, 280000), answer)
+        replies = self.say("가격 30")          # 알림이 하나면 번호 없이
+        self.assertIn("1박 30만원 이하", texts(replies))
+
     def test_unreadable_price_asks_again(self):
         self.say("비토애 산청 5/2~5/3 2명")
         self.say("경남 산청군")
