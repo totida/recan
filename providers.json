@@ -86,6 +86,13 @@
       "scrolls": 2
     },
     {
+      "key": "naver_hotels",
+      "name": "네이버 호텔 가격비교",
+      "enabled": true,
+      "_comment": "여러 여행사 값을 모은 화면. 숙소 번호는 등록 때 고른 네이버 장소나 '네이버 예약' 검색에서 얻는다. 결과는 맨 위에 보여준다.",
+      "rates_url": "https://hotels.naver.com/accommodation/search/detail/domestic/{place_id}/rates?rateTab=&dCheckIn={checkin}&dCheckOut={checkout}&dAdultCnt={guests}"
+    },
+    {
       "key": "hanatour",
       "name": "하나투어",
       "enabled": false,

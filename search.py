@@ -199,21 +199,59 @@ def similarity(query, text):
     return sum(b.size for b in blocks) / len(nq), max(b.size for b in blocks)
 
 
+def _name_gaps(query, line):
+    """두 이름을 맞춰 보고 (가장 긴 일치 길이, 서로 다른 부분 [(찾는 쪽, 카드 쪽)])."""
+    blocks = [b for b in difflib.SequenceMatcher(None, query, line, autojunk=False)
+              .get_matching_blocks() if b.size >= SIMILARITY_MIN_PIECE]
+    gaps, i, j = [], 0, 0
+    for block in blocks + [difflib.Match(len(query), len(line), 0)]:
+        gaps.append((query[i:block.a], line[j:block.b]))
+        i, j = block.a + block.size, block.b + block.size
+    return max((b.size for b in blocks), default=0), gaps
+
+
+def branch_conflict(query, text):
+    """이름의 같은 자리에 다른 말이 있는가 — 같은 브랜드의 다른 지점.
+
+    체인 호텔은 브랜드가 같아서 '토요코인 서울강남'을 찾는데 '토요코인 서울영등포'나
+    '토요코인 부산서면'이 '토요코인'만으로 통과했다. 그대로 두면 다른 지점의
+    빈방을 알린다. '강남' 자리에 '영등포'가 있으면 다른 숙소로 본다.
+    찾는 쪽 말이 카드 어딘가(지역 줄 등)에 있으면 다른 지점이 아니다.
+    '비토애 산청' vs '비토애 럭셔리 글램핑 산청점' 처럼 말이 끼어든 것은 괜찮다.
+    """
+    nq, whole = normalize(query), normalize(text)
+    for line in (text or "").splitlines():
+        longest, gaps = _name_gaps(nq, normalize(line))
+        if longest < SIMILARITY_MIN_BLOCK:
+            continue  # 이름 줄이 아니다
+        for mine, theirs in gaps:
+            if mine.isdigit() and theirs.isdigit() and mine != theirs:
+                return True  # '동대문1' vs '동대문2'
+            if (len(mine) >= SIMILARITY_MIN_PIECE and len(theirs) >= SIMILARITY_MIN_PIECE
+                    and mine not in whole):
+                return True
+    return False
+
+
 def card_matches(query, text, threshold=0.6):
     """카드가 찾는 숙소인지 판단."""
     # 부킹닷컴은 모든 카드에 '15.3 miles from 스테이루헤' 처럼 기준 숙소
     # 이름을 적어둔다. 그 문구까지 보면 엉뚱한 카드가 전부 걸린다.
     text = DISTANCE_RE.sub(" ", text or "")
+    if _korean_name_matches(query, text, threshold):
+        return not branch_conflict(query, text)
+    return roman_matches(query, text)
+
+
+def _korean_name_matches(query, text, threshold):
     if match_score(query, text) >= threshold:
         return True
     ratio, longest = similarity(query, text)
     if ratio >= SIMILARITY_THRESHOLD and longest >= SIMILARITY_MIN_BLOCK:
         return True
     tokens = sorted(query_tokens(query), key=len, reverse=True)
-    if tokens and len(normalize(tokens[0])) >= 3:
-        if normalize(tokens[0]) in normalize(text):
-            return True
-    return roman_matches(query, text)
+    return bool(tokens and len(normalize(tokens[0])) >= 3
+                and normalize(tokens[0]) in normalize(text))
 
 
 def is_soldout(text):
@@ -280,11 +318,14 @@ def fits_budget(won, budget, per_night=False):
                for value in values)
 
 
-def budget_price(text, budget):
-    """가격대 안에 드는 첫 값('120,000원'). 가격대가 없으면 find_price 와 같다."""
+def budget_price(text, budget, per_night=False):
+    """가격대 안에 드는 첫 값('120,000원'). 가격대가 없으면 find_price 와 같다.
+
+    per_night: 그 사이트가 늘 1박 값을 보여준다고 알고 있으면 True.
+    """
     if not budget:
         return find_price(text)
-    per_night = bool(PER_NIGHT_RE.search(text or ""))
+    per_night = per_night or bool(PER_NIGHT_RE.search(text or ""))
     for won in prices_in(text):
         if fits_budget(won, budget, per_night):
             return f"{won:,}원"
@@ -899,6 +940,98 @@ def naver_detail_result(browser, watch, place_url, name="네이버 예약"):
 
 
 # --------------------------------------------------------------------------
+# 네이버 호텔 가격비교 (hotels.naver.com)
+#
+# 여러 여행사의 값을 한 화면에 모아 보여준다. 부킹닷컴이 'no availability' 라고 해도
+# 여기에는 방이 뜨는 숙소가 있다(토요코인 서울강남, 2026-10-20 실측).
+# 주소의 숙소 번호는 네이버 장소 번호와 같아서 링크를 받지 않아도 열 수 있다.
+# 값은 '1박 세금 포함' 이다.
+# --------------------------------------------------------------------------
+
+NAVER_ACCOMMODATION_ID_RE = re.compile(r"/(?:accommodation|domestic)/(\d{6,})")
+# 방 목록은 '1박 세금 포함' 부터. 그 아래 '함께 찾는 호텔' 에는 다른 숙소 값이 붙어 있어
+# 거기까지 읽으면 마감된 날도 예약 가능으로 읽는다.
+RATES_START_WORDS = ("1박 세금 포함", "가격 낮은순")
+RATES_END_WORDS = ("이 호텔을 본 다른 사람이", "함께 찾는 호텔", "실제 예약이 많은 호텔",
+                   "추천 호텔 더보기")
+RATES_EMPTY_PHRASES = ("예약 가능한 객실이 없습니다", "예약 가능한 객실 없음")
+
+
+def naver_place_id(url):
+    """네이버 장소·호텔 주소에서 숙소 번호를 뽑는다. 없으면 빈 문자열."""
+    match = NAVER_ACCOMMODATION_ID_RE.search(url or "")
+    return match.group(1) if match else ""
+
+
+def _cut_before(text, words, start=0):
+    ends = [text.find(word, start) for word in words]
+    ends = [end for end in ends if end >= 0]
+    return text[start:min(ends)] if ends else text[start:]
+
+
+def naver_rates_section(page_text):
+    """'1박 세금 포함' 부터 '함께 찾는 호텔' 앞까지 — 이 숙소의 방 목록."""
+    page_text = page_text or ""
+    starts = [page_text.find(word) for word in RATES_START_WORDS]
+    starts = [start for start in starts if start >= 0]
+    if not starts:
+        return ""
+    return _cut_before(page_text, RATES_END_WORDS, min(starts))
+
+
+def _rates_date(value):
+    day = date.fromisoformat(value)
+    return f"{day.month:02d}.{day.day:02d}."
+
+
+def analyze_naver_rates(page_text, checkin, checkout):
+    """가격비교 화면에서 그 날짜에 방이 있는지. (상태, 안내)"""
+    page_text = page_text or ""
+    if len(page_text) < 100:
+        return STATUS_UNKNOWN, ""
+    # 날짜가 화면에 반영됐는지 본다. 사이트가 날짜를 바꿔 보여주면 엉뚱한 날의 빈방이다.
+    if _rates_date(checkin) not in page_text or _rates_date(checkout) not in page_text:
+        return STATUS_UNKNOWN, "날짜가 반영되지 않았어요"
+    hotel_part = _cut_before(page_text, RATES_END_WORDS)
+    if any(phrase in hotel_part for phrase in RATES_EMPTY_PHRASES):
+        return STATUS_SOLDOUT, "예약 가능한 객실이 없어요"
+    if find_price(naver_rates_section(page_text)):
+        return STATUS_AVAILABLE, ""
+    return STATUS_UNKNOWN, ""
+
+
+def naver_rates_url(template, place_id, watch):
+    return template.format(place_id=place_id, checkin=watch["checkin"],
+                           checkout=watch["checkout"], guests=watch.get("guests", 2))
+
+
+def naver_rates_result(browser, watch, site, place_id):
+    """네이버 호텔 가격비교 화면을 열어 그 날짜에 방이 있는지 본다."""
+    if not place_id:
+        return SiteResult(site["key"], site["name"], STATUS_NONE,
+                          note="네이버에서 숙소를 찾지 못해 가격비교를 열 수 없어요")
+    url = naver_rates_url(site["rates_url"], place_id, watch)
+    try:
+        page = browser.page_text(url)
+    except Exception as exc:  # noqa: BLE001
+        return SiteResult(site["key"], site["name"], STATUS_ERROR, url,
+                          note=str(exc).splitlines()[0][:120])
+
+    status, note = analyze_naver_rates(page, watch["checkin"], watch["checkout"])
+    section = naver_rates_section(page)
+    budget = watch_budget(watch)
+    if (status == STATUS_AVAILABLE and budget
+            and not budget_price(section, budget, per_night=True)):
+        status = STATUS_OVER_BUDGET
+    verified = verification_flag(
+        address_match_score(watch.get("address"), page, ignore=watch.get("query", "")))
+    offers = ([Offer(title="빈 객실 있음", price=budget_price(section, budget, per_night=True),
+                     url=url, address=address_line(page), verified=verified)]
+              if status == STATUS_AVAILABLE else [])
+    return SiteResult(site["key"], site["name"], status, url, offers, note)
+
+
+# --------------------------------------------------------------------------
 # 인터파크 트리플(등록된 링크가 있을 때)
 #
 # 트리플은 검색 화면이 자바스크립트로만 그려져서 숙소 이름으로는 찾아갈 수 없다.
@@ -1175,6 +1308,8 @@ def _search_site(browser, watch, site):
             place_url = first_place_link(term, cards,
                                          prefer=watch.get("query", ""))
             if place_url:
+                # 네이버 호텔 가격비교가 같은 숙소 번호로 열린다.
+                watch["naver_place_id"] = naver_place_id(place_url)
                 detail = naver_detail_result(browser, watch, place_url, site["name"])
                 detail.key = site["key"]
                 if detail.status != STATUS_UNKNOWN:
@@ -1241,9 +1376,22 @@ def search_watch(browser, watch, sites=None, after_site=None):
         results.append(triple_detail_result(browser, watch, watch["triple"]))
         done()
 
+    rates_sites = [site for site in sites if site.get("rates_url")]
     for site in sites:
+        if site.get("rates_url"):
+            continue  # 숙소 번호를 알아낸 뒤 맨 끝에 연다
         if "naver" in registered and site["key"] == "naver":
             continue  # 상세 링크로 이미 확인함
         results.append(_search_site(browser, watch, site))
+        done()
+
+    # 가격비교는 여러 여행사를 모아 보여주므로 결과 맨 위에 둔다.
+    place_id = naver_place_id(registered) or watch.get("naver_place_id", "")
+    for site in rates_sites:
+        rates = naver_rates_result(browser, watch, site, place_id)
+        if place_id:
+            results.insert(0, rates)
+        else:
+            results.append(rates)
         done()
     return results

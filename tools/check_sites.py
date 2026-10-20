@@ -86,10 +86,23 @@ def main():
                  "guests": args.guests, "address": address}
         candidates = [s for s in search.load_sites(include_disabled=True)
                       if s.get("enabled", True) or s.get("probe")]
+        # 네이버 호텔 가격비교를 열 숙소 번호 (주소 후보나 '네이버 예약' 검색에서 얻는다)
+        place_id = search.naver_place_id(found[0].get("url", "")) if found else ""
         for site in candidates:
             print("\n" + "=" * 70)
             state = "" if site.get("enabled", True) else "  (꺼짐 — 점검만)"
             print(f"🏨 {site['name']}{state}")
+            if site.get("rates_url"):
+                rates = search.naver_rates_result(browser, watch, site, place_id)
+                print(f"\n  → {rates.url or '(숙소 번호 없음)'}")
+                print(f"      → {LABEL.get(rates.status, rates.status)}"
+                      f"{f' ({rates.note})' if rates.note else ''}")
+                for offer in rates.offers:
+                    print(f"      ✅ {offer.title} {offer.price}")
+                if not place_id:
+                    problems.append(f"{site['name']}: 네이버 숙소 번호를 못 찾음 "
+                                    "→ '네이버 예약' 결과 확인")
+                continue
             best = None
             for index, template in enumerate(search.site_urls(site), start=1):
                 url = search.build_url(template, args.query, args.checkin,
@@ -122,6 +135,7 @@ def main():
                 if site.get("follow_place"):
                     place_url = search.first_place_link(args.query, cards)
                     if place_url:
+                        place_id = place_id or search.naver_place_id(place_url)
                         print(f"      ↪ 장소 페이지 확인: {place_url}")
                         detail = search.naver_detail_result(browser, watch, place_url,
                                                             site["name"])
