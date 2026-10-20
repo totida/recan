@@ -733,7 +733,7 @@ class StuckStateTest(unittest.TestCase):
 
     def test_forgotten_registration_expires(self):
         self.stall_at_date_step()
-        # 30분 넘게 손을 놓았다
+        # 1분 넘게 손을 놓았다
         self.state()["touched_at"] = int(time.time()) - bot.STATE_TTL - 1
         replies = self.say("소노캄 경주")
         self.assertNotIn("날짜를 이해하지 못했어요", texts(replies))
@@ -743,6 +743,29 @@ class StuckStateTest(unittest.TestCase):
         self.stall_at_date_step()
         self.say("5/2~5/3")
         self.assertIsNotNone(self.state())
+
+    def test_ttl_is_one_minute(self):
+        self.assertEqual(bot.STATE_TTL, 60)
+
+    def test_late_answer_is_not_searched_as_a_hotel(self):
+        # 인원·가격·확인 대답을 1분 넘게 지나 보내면 숙소 이름으로 찾지 않고 처음부터라고 알린다
+        for late in ("4", "4명", "15만 이하", "예", "5/2~5/3"):
+            self.setUp()
+            self.stall_at_date_step()
+            self.state()["touched_at"] = int(time.time()) - bot.STATE_TTL - 1
+            replies = self.say(late)
+            self.assertIn("1분 넘게 입력이 없어서", texts(replies), late)
+            self.assertIn("숙소 이름을 보내주세요", texts(replies), late)
+            self.assertIsNone(self.state(), late)
+
+    def test_buttons_keep_the_registration_alive(self):
+        self.stall_at_date_step()
+        self.state()["touched_at"] = int(time.time()) - bot.STATE_TTL - 1
+        bot.handle_callback(self.db, CHAT, "cal:in:2026-05-02", today=TODAY)
+        self.assertEqual(self.state()["step"], "await_checkout")
+        self.assertGreater(self.state()["touched_at"], int(time.time()) - 5)
+        self.say("5/2~5/3")                        # 버튼을 누른 뒤라 아직 등록 중
+        self.assertIn(self.state()["step"], ("await_guests", "await_confirm"))
 
 
 class MenuButtonTest(unittest.TestCase):

@@ -63,8 +63,11 @@ BROWSER_IDLE = int(os.environ.get("BROWSER_IDLE_SEC", "300"))
 # 등록하며 버튼을 연달아 누르는 동안 검색이 끼어들면 버튼마다 수십 초씩 늦어진다.
 CHAT_QUIET = int(os.environ.get("CHAT_QUIET_SEC", "30"))
 
-# 등록을 하다 말고 이만큼 지나면, 다음 메시지는 새 요청으로 본다.
-STATE_TTL = int(os.environ.get("STATE_TTL_MIN", "30")) * 60
+# 등록을 하다 말고 이만큼 입력이 없으면, 다음 글은 처음(숙소 찾기)부터 다시 본다.
+# 버튼은 무엇을 누른 건지 분명하므로 시간이 지나도 이어서 받는다.
+STATE_TTL = int(os.environ.get("STATE_TTL_SEC", "60"))
+# 숙소 이름이 아니라 앞 단계에 대한 대답으로 보이는 말에서 걷어낼 단위
+ANSWER_UNIT_RE = re.compile(r"명|인|만|원|이하|이상|박|월|일")
 
 SKIP_WORDS = ("건너뛰기", "건너뜀", "스킵", "skip", "모름", "몰라", "패스")
 NONE_WORDS = ("없음", "없어요", "없어", "직접", "직접입력", "기타")
@@ -292,6 +295,20 @@ def _looks_like_new_name(text):
     """
     text = (text or "").strip()
     return len(text) >= 2 and len(text) <= 60 and not any(c.isdigit() for c in text)
+
+
+def _looks_like_answer(text):
+    """숙소 이름이 아니라 앞 단계에 대한 대답처럼 보이는가. ('4', '15만 이하', '예', '5/2~5/3')"""
+    word = re.sub(r"\s", "", (text or "").lower())
+    if word in YES_WORDS + NO_WORDS + SKIP_WORDS + NONE_WORDS + ANY_PRICE_WORDS:
+        return True
+    return len(re.findall(r"[가-힣a-z]", ANSWER_UNIT_RE.sub("", word))) < 2
+
+
+def _restart_text():
+    wait = f"{STATE_TTL // 60}분" if STATE_TTL >= 60 else f"{STATE_TTL}초"
+    return (f"⏰ {wait} 넘게 입력이 없어서 처음부터 다시 할게요.\n"
+            "🏨 숙소 이름을 보내주세요. (예: 비토애 산청)")
 
 
 def _object_particle(word):
@@ -693,7 +710,10 @@ def handle_text(db, chat_id, text, today=None, lookup=None):
 
     state = chat.get("state") or {}
     if state and time.time() - state.get("touched_at", 0) > STATE_TTL:
-        chat["state"] = state = {}   # 하다 만 등록은 잊는다
+        chat["state"], state = None, {}   # 하다 만 등록은 잊고 숙소 찾기부터
+        if _looks_like_answer(text):
+            # '4'·'15만 이하' 같은 대답을 숙소 이름으로 검색하지 않게 알려만 준다
+            return [reply(_restart_text())]
     elif state:
         state["touched_at"] = int(time.time())
     step = state.get("step")
@@ -862,6 +882,7 @@ def handle_callback(db, chat_id, data, today=None):
 
     if not state:
         return [reply("진행 중인 등록이 없어요. 숙소 이름을 다시 보내주세요.")]
+    state["touched_at"] = int(time.time())   # 버튼을 누르는 동안은 계속 등록 중이다
 
     if action == "triple":
         if kind == "pick" and value.isdigit():
