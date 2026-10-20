@@ -3,6 +3,8 @@
 import calendar as _calendar
 from datetime import date, timedelta
 
+import price
+
 WEEK_HEADERS = ("월", "화", "수", "목", "금", "토", "일")
 MAX_MONTHS_AHEAD = 12
 NOOP = "cal:x"
@@ -113,6 +115,34 @@ def guests_message(query, checkin, checkout, nights):
         f"📅 {checkin} → {checkout} ({nights}박)\n\n"
         "👤 몇 분이 묵으시나요?\n"
         "인원에 맞는 객실만 찾아드릴게요."
+    )
+
+
+# 1박 가격대 버튼 (최저, 최고). None 은 그쪽이 열려 있다는 뜻.
+PRICE_CHOICES = (
+    (None, 100000), (100000, 150000), (150000, 200000),
+    (200000, 300000), (300000, 500000), (500000, None),
+)
+
+
+def price_keyboard():
+    """1박 가격대 선택 버튼."""
+    rows = []
+    for start in range(0, len(PRICE_CHOICES), 3):
+        rows.append([_button(price.short_label(low, high),
+                             f"price:pick:{low or ''}-{high or ''}")
+                     for low, high in PRICE_CHOICES[start:start + 3]])
+    rows.append([_button("💰 상관없음", "price:any")])
+    rows.append([_button("✍️ 직접 입력", "price:type"), _button("✖️ 취소", "price:cancel")])
+    return rows
+
+
+def price_message(query, checkin, checkout, nights, guests):
+    return (
+        f"🏨 {query}\n"
+        f"📅 {checkin} → {checkout} ({nights}박 · {guests}명)\n\n"
+        "💰 1박 가격대를 골라주세요.\n"
+        "그 가격대 안의 빈방만 알려드릴게요."
     )
 
 

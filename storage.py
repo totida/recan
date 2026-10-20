@@ -115,7 +115,7 @@ def ensure_owner(db):
 
 
 def new_watch(query, checkin, checkout, guests=2, url=None, address="", keyword="",
-              triple=None):
+              triple=None, price_min=None, price_max=None):
     return {
         "id": uuid.uuid4().hex[:8],
         "query": query,             # 표시용 이름(네이버 정식 명칭일 수 있음)
@@ -124,6 +124,8 @@ def new_watch(query, checkin, checkout, guests=2, url=None, address="", keyword=
         "checkin": checkin,          # "YYYY-MM-DD"
         "checkout": checkout,        # "YYYY-MM-DD"
         "guests": guests,
+        "price_min": price_min,      # 1박 가격대(원). None 이면 제한 없음
+        "price_max": price_max,
         "url": url,                  # 네이버 등 특정 숙소 상세 링크(선택)
         "triple": triple or None,    # 인터파크 트리플 숙소 링크(선택)
         "created_at": int(time.time()),
@@ -186,6 +188,8 @@ def migrate(raw):
             for watch in chat["watches"]:
                 watch.setdefault("address", "")
                 watch.setdefault("keyword", watch.get("query", ""))
+                watch.setdefault("price_min", None)
+                watch.setdefault("price_max", None)
         ensure_owner(raw)
         return raw
 

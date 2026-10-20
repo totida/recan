@@ -15,6 +15,7 @@ from datetime import date
 
 import dateparse
 import keyboards
+import price
 import search
 import storage
 import telegram_api
@@ -41,6 +42,7 @@ STATUS_ICON = {
     search.STATUS_NONE: "🔍",
     search.STATUS_UNKNOWN: "❔",
     search.STATUS_ERROR: "⚠️",
+    search.STATUS_OVER_BUDGET: "💸",
 }
 STATUS_LABEL = {
     search.STATUS_AVAILABLE: "예약 가능",
@@ -48,6 +50,7 @@ STATUS_LABEL = {
     search.STATUS_NONE: "검색 결과 없음",
     search.STATUS_UNKNOWN: "확인 불가",
     search.STATUS_ERROR: "검색 실패",
+    search.STATUS_OVER_BUDGET: "가격대 밖",
 }
 # 숙소는 찾았는데 가격·마감 표시가 없을 때 왜 그런지 알려준다.
 UNKNOWN_NOTE = "숙소는 찾았지만 가격 표시가 없어 판정 보류 · 링크에서 확인해 주세요"
@@ -64,6 +67,11 @@ NONE_WORDS = ("없음", "없어요", "없어", "직접", "직접입력", "기타
 YES_WORDS = ("예", "네", "넹", "ㅇ", "ㅇㅇ", "응", "yes", "y", "ok", "확인",
              "맞아", "맞아요", "맞습니다", "등록")
 NO_WORDS = ("아니오", "아니요", "아뇨", "아니", "ㄴ", "no", "n", "틀려", "틀렸어요", "다시")
+ANY_PRICE_WORDS = SKIP_WORDS + ("상관없음", "상관없어", "상관없어요", "무관", "아무거나",
+                                "없음", "제한없음", "전체")
+PRICE_HELP = ("가격대를 이렇게 보내주세요. (1박 기준)\n"
+              "예) 10~15만 · 15만 이하 · 10만 이상\n"
+              "상관없으면 '상관없음'.")
 
 HELP_TEXT = (
     "🏨 숙소 빈방 알림봇\n\n"
@@ -73,6 +81,7 @@ HELP_TEXT = (
     "2️⃣ 네이버에서 찾은 숙소 후보를 주소와 함께 보여드릴게요. 버튼으로 고르시면 돼요.\n"
     "3️⃣ 오늘 날짜 기준 달력에서 체크인 · 체크아웃 날짜를 눌러주세요.\n"
     "    이어서 인원을 고르면 그 인원이 묵을 수 있는 객실만 찾아드려요.\n"
+    "    1박 가격대(예: 10~15만)를 고르면 그 가격대 안의 빈방만 알려드려요.\n"
     "4️⃣ 켜져 있는 예약 사이트를 주기적으로 검색해서\n"
     "    예약 가능한 방이 보이면 바로 알려드려요.\n"
     "    (고르신 주소로 같은 숙소가 맞는지 검색 결과를 다시 대조합니다)\n\n"
@@ -84,6 +93,7 @@ HELP_TEXT = (
     "  목록 — 등록된 알림 보기\n"
     "  삭제 2 — 2번 알림 삭제 (삭제 전체 = 모두 삭제)\n"
     "  인원 2 4 — 2번 알림을 4명으로 변경\n"
+    "  가격 2 10~15만 — 2번 알림의 1박 가격대 변경 (상관없음 = 제한 없앰)\n"
     "  지금 — 기다리지 않고 바로 검색\n"
     "  취소 — 입력 중이던 등록 취소\n"
     "  내아이디 — 이 대화의 채팅 ID 보기\n"
@@ -106,6 +116,12 @@ def reply(text, keyboard=None, edit=False):
 # 메시지 만들기
 # --------------------------------------------------------------------------
 
+def price_text(watch):
+    """'1박 10~15만원'. 가격대를 정하지 않았으면 빈 문자열."""
+    low, high = watch.get("price_min"), watch.get("price_max")
+    return f"1박 {price.describe(low, high)}" if low or high else ""
+
+
 def stay_line(watch):
     nights = dateparse.nights_between(watch["checkin"], watch["checkout"])
     return (
@@ -122,6 +138,8 @@ def format_report(watch, results, header=""):
     if watch.get("address"):
         lines.append(f"📍 {watch['address']}")
     lines.append(stay_line(watch))
+    if price_text(watch):
+        lines.append(f"💰 {price_text(watch)}")
     lines.append("")
     for result in results:
         icon = STATUS_ICON.get(result.status, "❔")
@@ -131,11 +149,13 @@ def format_report(watch, results, header=""):
         note = result.note
         if result.status == search.STATUS_UNKNOWN and not note:
             note = UNKNOWN_NOTE
+        if result.status == search.STATUS_OVER_BUDGET and not note:
+            note = f"{price_text(watch)} 안에는 빈방이 없어요"
         suffix = f" — {note}" if note else ""
         lines.append(f"{icon} {result.name} · {label}{suffix}")
         for offer in result.offers:
-            price = f" {offer.price}" if offer.price else ""
-            lines.append(f"    • {offer.title}{price}")
+            amount = f" {offer.price}" if offer.price else ""
+            lines.append(f"    • {offer.title}{amount}")
             if offer.address:
                 mark = "주소 일치" if offer.verified is not False else "주소 불일치 가능"
                 lines.append(f"      📍 {offer.address} ({mark})")
@@ -157,6 +177,8 @@ def format_watch_list(watches):
         if watch.get("address"):
             lines.append(f"   📍 {watch['address']}")
         lines.append(f"   {stay_line(watch)}")
+        if price_text(watch):
+            lines.append(f"   💰 {price_text(watch)}")
         if watch.get("triple"):
             lines.append("   🔗 인터파크 트리플 연결됨")
     return "\n".join(lines)
@@ -276,7 +298,7 @@ def site_summary():
 
 
 def register_watch(chat, query, checkin, checkout, guests, url=None, address="",
-                   keyword=""):
+                   keyword="", price_min=None, price_max=None):
     """감시 항목 등록. (watch, 안내문) 반환."""
     if len(chat["watches"]) >= MAX_WATCHES:
         return None, (f"알림은 최대 {MAX_WATCHES}개까지 등록할 수 있어요. "
@@ -292,10 +314,13 @@ def register_watch(chat, query, checkin, checkout, guests, url=None, address="",
         ):
             return None, f"이미 등록된 알림이에요: {query} ({ci} → {co})"
 
-    watch = storage.new_watch(query, ci, co, guests, url, address, keyword)
+    watch = storage.new_watch(query, ci, co, guests, url, address, keyword,
+                              price_min=price_min, price_max=price_max)
     watch["force"] = True  # 등록 직후 한 번 바로 검색
     chat["watches"].append(watch)
     nights = dateparse.nights_between(ci, co)
+    budget = price_text(watch)
+    budget_line = f"💰 {budget} 안의 빈방만 알려드려요\n" if budget else ""
     sites, minutes = site_summary()
     address_line = f"📍 {address}\n" if address else ""
     keyword_line = (f"🔎 검색어: {keyword}\n"
@@ -311,7 +336,8 @@ def register_watch(chat, query, checkin, checkout, guests, url=None, address="",
         f"🏨 {query}\n"
         f"{address_line}"
         f"{keyword_line}"
-        f"📅 {ci} → {co} ({nights}박 · {guests}명)\n\n"
+        f"📅 {ci} → {co} ({nights}박 · {guests}명)\n"
+        f"{budget_line}\n"
         f"{verify_line}"
         f"{sites}{_object_particle(sites)} {minutes}분마다 검색할게요.\n"
         "잠시 후 첫 검색 결과를 보내드립니다."
@@ -323,11 +349,13 @@ def register_watch(chat, query, checkin, checkout, guests, url=None, address="",
 # --------------------------------------------------------------------------
 
 def _start_registration(chat, query, guests, today, url=None,
-                        checkin=None, checkout=None, lookup=None):
+                        checkin=None, checkout=None, lookup=None, price_range=None):
     """숙소 이름을 받은 뒤 네이버에서 후보를 찾아 되묻는다."""
+    low, high = price_range or (None, None)
     state = {
         "query": query, "keyword": query, "guests": guests or DEFAULT_GUESTS,
         "guests_set": bool(guests), "url": url,
+        "price_min": low, "price_max": high, "price_set": bool(price_range),
         "checkin": checkin, "checkout": checkout,
         "address": "", "address_source": "",
         "touched_at": int(time.time()),
@@ -416,6 +444,29 @@ def _set_guests(chat, state, guests, edit=False):
     return _finish(chat, state, edit=edit)
 
 
+def _ask_price(chat, state, edit=False):
+    """1박 가격대를 물어본다. 고른 가격대 안의 빈방만 알린다."""
+    state["step"] = "await_price"
+    chat["state"] = state
+    nights = dateparse.nights_between(state["checkin"], state["checkout"])
+    return [reply(
+        keyboards.price_message(state["query"], state["checkin"], state["checkout"],
+                                nights, state.get("guests", DEFAULT_GUESTS)),
+        keyboards.price_keyboard(),
+        edit=edit,
+    )]
+
+
+def _set_price(chat, state, low, high, edit=False):
+    state["price_min"], state["price_max"] = low, high
+    state["price_set"] = True
+    return _finish(chat, state, edit=edit)
+
+
+def _wants_any_price(text):
+    return re.sub(r"\s", "", (text or "").lower()) in ANY_PRICE_WORDS
+
+
 def _ask_confirm(chat, state, edit=False):
     state["step"] = "await_confirm"
     chat["state"] = state
@@ -426,7 +477,8 @@ def _ask_confirm(chat, state, edit=False):
         f"🏨 숙소: {state['query']}\n"
         f"📍 주소: {address}\n"
         f"📅 일정: {state['checkin']} → {state['checkout']} ({nights}박)\n"
-        f"👤 인원: {state['guests']}명\n\n"
+        f"👤 인원: {state['guests']}명\n"
+        f"💰 가격: {price_text(state) or '상관없음'}\n\n"
         "맞으면 '예', 다시 입력하려면 '아니오'를 보내주세요.",
         keyboards.confirm_keyboard(),
         edit=edit,
@@ -444,14 +496,10 @@ def _finish(chat, state, edit=False):
     """네이버에서 고른 숙소는 바로 등록, 직접 입력한 주소는 한 번 더 확인."""
     if not state.get("guests_set"):
         return _ask_guests(chat, state, edit=edit)
+    if not state.get("price_set"):
+        return _ask_price(chat, state, edit=edit)
     if state.get("address_source") in ("naver", "link"):
-        chat["state"] = None
-        _, message = register_watch(
-            chat, state["query"], state["checkin"], state["checkout"],
-            state.get("guests", DEFAULT_GUESTS), state.get("url"),
-            state.get("address", ""), state.get("keyword", ""),
-        )
-        return [reply(message, edit=edit)]
+        return _confirm_yes(chat, state, edit=edit)
     return _ask_confirm(chat, state, edit=edit)
 
 
@@ -500,6 +548,40 @@ def _change_guests(chat, argument):
     return (f"👤 인원을 {guests}명으로 바꿨어요.\n"
             f"🏨 {watch['query']} ({watch['checkin']} → {watch['checkout']})\n"
             "바뀐 인원으로 지금 다시 검색할게요.")
+
+
+def _change_price(chat, argument):
+    """등록된 알림의 1박 가격대를 바꾼다. '가격 2 10~15만' = 2번 알림을 10~15만원으로."""
+    watches = chat["watches"]
+    if not watches:
+        return "등록된 알림이 없어요."
+    argument = re.sub(r"\s*([~～∼\-–—])\s*", r"\1", argument).strip()
+    head, _, rest = argument.partition(" ")
+    if head.isdigit() and rest.strip():
+        index, wanted = int(head), rest.strip()
+    elif len(watches) == 1 and argument:
+        index, wanted = 1, argument
+    else:
+        return ("'가격 2 10~15만' 처럼 보내주세요. (2번 알림을 1박 10~15만원으로)\n"
+                "가격대를 없애려면 '가격 2 상관없음'. '목록' 으로 번호를 확인할 수 있어요.")
+    if not 1 <= index <= len(watches):
+        return f"1 ~ {len(watches)} 사이의 번호를 알려주세요."
+    if _wants_any_price(wanted):
+        low = high = None
+    else:
+        parsed = price.parse_range(wanted, bare=True)
+        if not parsed:
+            return PRICE_HELP
+        low, high, _ = parsed
+
+    watch = watches[index - 1]
+    watch["price_min"], watch["price_max"] = low, high
+    watch["force"] = True          # 바뀐 가격대로 바로 다시 검색
+    changed = (f"💰 가격대를 {price_text(watch)}(으)로 바꿨어요."
+               if low or high else "💰 가격대 제한을 없앴어요.")
+    return (f"{changed}\n"
+            f"🏨 {watch['query']} ({watch['checkin']} → {watch['checkout']})\n"
+            "바뀐 가격대로 지금 다시 검색할게요.")
 
 
 def _handle_delete(chat, argument):
@@ -584,6 +666,10 @@ def handle_text(db, chat_id, text, today=None, lookup=None):
     if head_lower in ("인원", "사람", "guests"):
         return [reply(_change_guests(chat, argument))]
 
+    # '예산'은 지역 이름(예산군)이라 명령으로 쓰지 않는다.
+    if head_lower in ("가격", "가격대", "price"):
+        return [reply(_change_price(chat, argument))]
+
     if head_lower in ("지금", "지금검색", "새로고침", "now", "refresh"):
         if not chat["watches"]:
             return [reply("등록된 알림이 없어요. 숙소 이름부터 보내주세요.")]
@@ -647,6 +733,10 @@ def handle_text(db, chat_id, text, today=None, lookup=None):
         if typed_guests:
             state["guests"] = typed_guests
             state["guests_set"] = True
+        typed_price = price.parse_range(text)
+        if typed_price:
+            state["price_min"], state["price_max"] = typed_price[:2]
+            state["price_set"] = True
         return _finish(chat, state)
 
     # 4) 인원 입력 (버튼 대신 숫자로 적어도 되게)
@@ -658,7 +748,16 @@ def handle_text(db, chat_id, text, today=None, lookup=None):
             return [reply("인원을 숫자로 알려주세요. (예: 4 또는 4명)")]
         return _set_guests(chat, state, guests)
 
-    # 5) 최종 확인
+    # 5) 가격대 입력 (버튼 대신 '10~15만' 처럼 적어도 되게)
+    if step == "await_price":
+        if _wants_any_price(command):
+            return _set_price(chat, state, None, None)
+        parsed = price.parse_range(text, bare=True)
+        if not parsed:
+            return [reply(PRICE_HELP)]
+        return _set_price(chat, state, parsed[0], parsed[1])
+
+    # 6) 최종 확인
     if step == "await_confirm":
         answer = command.lower().rstrip("!.~ ")
         if answer in YES_WORDS:
@@ -668,13 +767,13 @@ def handle_text(db, chat_id, text, today=None, lookup=None):
             return [reply("알겠습니다. 숙소 이름부터 다시 알려주세요. (예: 비토애 산청)")]
         return [reply("'예' 또는 '아니오'로 답해주세요. 처음부터 다시 하려면 '취소'.")]
 
-    # 6) 트리플 링크를 붙일 알림 고르기
+    # 7) 트리플 링크를 붙일 알림 고르기
     if step == "await_triple_target":
         if command.isdigit():
             return _attach_triple(chat, state.get("triple", ""), int(command) - 1)
         return [reply("목록의 번호를 보내주시거나 버튼을 눌러주세요. (취소하려면 '취소')")]
 
-    # 7) 새 요청 — 링크 또는 숙소 이름
+    # 8) 새 요청 — 링크 또는 숙소 이름
     triple = search.triple_link(text)
     if triple:
         return _ask_triple_target(chat, triple)
@@ -707,6 +806,7 @@ def handle_text(db, chat_id, text, today=None, lookup=None):
         chat, name, guests, today, lookup=lookup,
         checkin=parsed["checkin"].isoformat() if parsed["checkin"] else None,
         checkout=parsed["checkout"].isoformat() if parsed["checkout"] else None,
+        price_range=parsed["price"],
     )
 
 
@@ -716,6 +816,7 @@ def _confirm_yes(chat, state, edit=False):
         chat, state["query"], state["checkin"], state["checkout"],
         state.get("guests", DEFAULT_GUESTS), state.get("url"),
         state.get("address", ""), state.get("keyword", ""),
+        state.get("price_min"), state.get("price_max"),
     )
     return [reply(message, edit=edit)]
 
@@ -802,6 +903,21 @@ def handle_callback(db, chat_id, data, today=None):
             return _set_guests(chat, state, int(value), edit=True)
         if kind == "type":
             return [reply("인원을 숫자로 보내주세요. (예: 4)")]
+        if kind == "cancel":
+            chat["state"] = None
+            return [reply("등록을 취소했어요.", edit=True)]
+
+    if action == "price":
+        if kind == "pick":
+            low, _, high = value.partition("-")
+            if not (low + high).isdigit():
+                return []
+            return _set_price(chat, state, int(low) if low else None,
+                              int(high) if high else None, edit=True)
+        if kind == "any":
+            return _set_price(chat, state, None, None, edit=True)
+        if kind == "type":
+            return [reply(PRICE_HELP)]
         if kind == "cancel":
             chat["state"] = None
             return [reply("등록을 취소했어요.", edit=True)]
