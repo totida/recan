@@ -1351,30 +1351,49 @@ def _search_site(browser, watch, site):
     return result
 
 
-def search_watch(browser, watch, sites=None, after_site=None):
+class _AnswerBetweenPages:
+    """페이지를 새로 열기 직전마다 between() 을 불러 텔레그램 입력을 받는다.
+
+    예전에는 사이트 사이에서만 받았다. 여기어때는 검색 주소를 4개까지 시도하고
+    없는 숙소면 주소마다 16초쯤 기다려서, 그동안 1분 넘게 버튼이 먹통이었다.
+    새 페이지를 열기 직전이면 브라우저를 잠깐 다른 일(숙소 이름 찾기)에 써도
+    곧 새 페이지로 덮이므로 안전하다. 읽어 온 카드는 이미 글자로 받아 둔 상태다.
+    """
+
+    def __init__(self, browser, between):
+        self._browser = browser
+        self._between = between
+
+    def collect_cards(self, *args, **kwargs):
+        self._between()
+        return self._browser.collect_cards(*args, **kwargs)
+
+    def page_text(self, *args, **kwargs):
+        self._between()
+        return self._browser.page_text(*args, **kwargs)
+
+    def __getattr__(self, name):
+        return getattr(self._browser, name)
+
+
+def search_watch(browser, watch, sites=None, between=None):
     """감시 항목 하나에 대해 모든 사이트를 검색.
 
-    after_site 를 주면 사이트 하나를 끝낼 때마다 불러준다. 검색 한 바퀴가
+    between 을 주면 페이지를 새로 열기 직전마다 불러준다. 검색 한 바퀴가
     길어도 그 사이에 텔레그램 입력을 처리해 봇이 먹통으로 보이지 않게 한다.
-    사이트 사이에서만 부르므로, 다음 사이트는 어차피 페이지를 새로 열어
-    브라우저를 같이 써도 문제가 없다.
     """
     sites = sites if sites is not None else load_sites()
     results = []
-
-    def done():
-        if after_site:
-            after_site()
+    if between:
+        browser = _AnswerBetweenPages(browser, between)
 
     registered = watch.get("url") or ""
     if "naver" in registered:
         results.append(naver_detail_result(browser, watch, registered,
                                            "네이버 예약(등록 링크)"))
-        done()
 
     if watch.get("triple"):
         results.append(triple_detail_result(browser, watch, watch["triple"]))
-        done()
 
     rates_sites = [site for site in sites if site.get("rates_url")]
     for site in sites:
@@ -1383,7 +1402,6 @@ def search_watch(browser, watch, sites=None, after_site=None):
         if "naver" in registered and site["key"] == "naver":
             continue  # 상세 링크로 이미 확인함
         results.append(_search_site(browser, watch, site))
-        done()
 
     # 가격비교는 여러 여행사를 모아 보여주므로 결과 맨 위에 둔다.
     place_id = naver_place_id(registered) or watch.get("naver_place_id", "")
@@ -1393,5 +1411,4 @@ def search_watch(browser, watch, sites=None, after_site=None):
             results.insert(0, rates)
         else:
             results.append(rates)
-        done()
     return results

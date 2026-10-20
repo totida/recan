@@ -59,6 +59,10 @@ UNKNOWN_NOTE = "숙소는 찾았지만 가격 표시가 없어 판정 보류 · 
 # 두어, 숙소 이름을 넣었을 때 크롬이 새로 뜨는 시간을 기다리지 않게 한다.
 BROWSER_IDLE = int(os.environ.get("BROWSER_IDLE_SEC", "300"))
 
+# 마지막 입력 뒤 이만큼은 '대화 중'으로 보고 새 검색을 시작하지 않는다.
+# 등록하며 버튼을 연달아 누르는 동안 검색이 끼어들면 버튼마다 수십 초씩 늦어진다.
+CHAT_QUIET = int(os.environ.get("CHAT_QUIET_SEC", "30"))
+
 # 등록을 하다 말고 이만큼 지나면, 다음 메시지는 새 요청으로 본다.
 STATE_TTL = int(os.environ.get("STATE_TTL_MIN", "30")) * 60
 
@@ -1093,7 +1097,13 @@ def _collect_due(db, now, today):
     return due, notices
 
 
-def run_due_searches(db, now=None, today=None, browser=None, between=None):
+def run_due_searches(db, now=None, today=None, browser=None, between=None,
+                     chatting=None):
+    """검색할 때가 된 항목을 검색해 알린다.
+
+    between: 페이지를 새로 열기 직전마다 불러 텔레그램 입력을 받는다.
+    chatting: 참이면 사용자가 대화 중이다. 남은 항목 검색은 다음 바퀴로 미룬다.
+    """
     now = now or time.time()
     today = today or dateparse.today_kst()
     due, notices = _collect_due(db, now, today)
@@ -1109,11 +1119,13 @@ def run_due_searches(db, now=None, today=None, browser=None, between=None):
     browser = browser or search.Browser()
     try:
         for chat_id, watch in due:
+            if chatting and chatting():
+                print("💬 대화 중이라 남은 검색은 다음 바퀴로 미룹니다")
+                break
             forced = bool(watch.get("force"))
             print(f"🔎 검색: {watch['query']} {watch['checkin']}~{watch['checkout']} "
                   f"(chat {mask(chat_id)})")
-            results = search.search_watch(browser, watch, sites,
-                                          after_site=between)
+            results = search.search_watch(browser, watch, sites, between=between)
             for result in results:
                 print(f"   - {result.name}: {result.status} "
                       f"({len(result.offers)}건) {result.note}")
@@ -1169,11 +1181,17 @@ def main():
             if process_updates(db, browser, timeout=0):
                 seen["activity"] = time.time()
 
+        def chatting():
+            last = seen["activity"]
+            return last is not None and time.time() - last < CHAT_QUIET
+
         while True:
             handled = process_updates(db, browser, timeout=timeout)
             if handled:
                 seen["activity"] = time.time()
-            searched = run_due_searches(db, browser=browser, between=pump)
+            searched = (False if chatting() else
+                        run_due_searches(db, browser=browser, between=pump,
+                                         chatting=chatting))
             storage.save_db(db)
             storage.persist()
 

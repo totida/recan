@@ -925,9 +925,20 @@ class StayAwakeDuringSearchTest(unittest.TestCase):
     """검색이 도는 동안에도 텔레그램 입력을 받는지."""
 
     class CountingBrowser:
+        def __init__(self, cards=None):
+            self.pages = 0
+            self.cards = cards
+
         def collect_cards(self, url, selectors, wait=6, scrolls=2, retry_wait=5,
                           ready=None):
+            self.pages += 1
+            if self.cards is not None:
+                return self.cards
             return [{"text": "비토애 산청\n산청군 시천면\n120,000원", "url": "https://x/1"}]
+
+        def page_text(self, url, wait=10, scrolls=3):
+            self.pages += 1
+            return ""
 
         def body_text(self, limit=2000):
             return ""
@@ -943,13 +954,42 @@ class StayAwakeDuringSearchTest(unittest.TestCase):
         self.watch = chat["watches"][0]
         self.watch["force"] = True
 
-    def test_called_between_sites(self):
+    def test_called_before_every_page(self):
         calls = []
+        browser = self.CountingBrowser()
         with FakeTelegram():
-            bot.run_due_searches(self.db, browser=self.CountingBrowser(),
+            bot.run_due_searches(self.db, browser=browser,
                                  today=TODAY, between=lambda: calls.append(1))
-        sites = len(search.load_sites())
-        self.assertEqual(len(calls), sites)   # 사이트마다 한 번씩
+        self.assertEqual(len(calls), browser.pages)   # 페이지를 열 때마다 한 번씩
+        self.assertGreaterEqual(len(calls), len(search.load_sites()) - 1)
+
+    def test_called_between_address_tries_of_one_site(self):
+        # 숙소가 없으면 검색 주소를 차례로 다 시도한다. 그 사이사이에도 입력을 받는다.
+        site = {"key": "yeogi", "name": "여기어때",
+                "urls": ["https://a/?q={query}", "https://b/?q={query}",
+                         "https://c/?q={query}"]}
+        browser = self.CountingBrowser(cards=[{"text": "다른 숙소", "url": "https://x"}])
+        calls = []
+        search.search_watch(browser, self.watch, [site], between=lambda: calls.append(1))
+        self.assertEqual(browser.pages, 3)
+        self.assertEqual(len(calls), 3)
+
+    def test_searches_wait_while_chatting(self):
+        chat = storage.get_chat(self.db, CHAT)
+        chat["watches"].append(storage.new_watch("소노벨 변산", "2026-05-02", "2026-05-03",
+                                                 2, address="전북 부안군 변산면"))
+        chat["watches"][1]["force"] = True
+        talking = {"now": False}
+
+        def between():
+            talking["now"] = True    # 첫 숙소를 검색하는 동안 사용자가 말을 걸었다
+
+        with FakeTelegram():
+            bot.run_due_searches(self.db, browser=self.CountingBrowser(), today=TODAY,
+                                 between=between, chatting=lambda: talking["now"])
+        self.assertFalse(chat["watches"][0]["force"])      # 첫 숙소는 끝까지 검색
+        self.assertTrue(chat["watches"][1]["force"])       # 두 번째는 다음 바퀴로
+        self.assertEqual(chat["watches"][1]["last_searched"], 0)
 
     def test_works_without_the_hook(self):
         with FakeTelegram() as fake:
