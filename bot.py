@@ -706,7 +706,11 @@ def handle_text(db, chat_id, text, today=None, lookup=None):
             return [reply("등록된 알림이 없어요. 숙소 이름부터 보내주세요.")]
         for watch in chat["watches"]:
             watch["force"] = True
-        return [reply("🔄 지금 바로 검색할게요. 잠시만 기다려 주세요!")]
+        count = len(chat["watches"])
+        if count == 1:
+            return [reply("🔄 지금 바로 검색할게요. 2~3분쯤 걸려요!")]
+        return [reply(f"🔄 지금 바로 검색할게요. 숙소 {count}곳이라 한 곳씩 끝나는 대로 "
+                      f"보내드려요. (한 곳에 2~3분, 다 오려면 {count * 3}분쯤)")]
 
     state = chat.get("state") or {}
     if state and time.time() - state.get("touched_at", 0) > STATE_TTL:
@@ -1123,7 +1127,8 @@ def run_due_searches(db, now=None, today=None, browser=None, between=None,
     """검색할 때가 된 항목을 검색해 알린다.
 
     between: 페이지를 새로 열기 직전마다 불러 텔레그램 입력을 받는다.
-    chatting: 참이면 사용자가 대화 중이다. 남은 항목 검색은 다음 바퀴로 미룬다.
+    chatting(forced): 참이면 대화 중이라 그 항목 검색을 다음 바퀴로 미룬다.
+    '지금'·등록 직후처럼 직접 부른 검색(forced)을 먼저 한다.
     """
     now = now or time.time()
     today = today or dateparse.today_kst()
@@ -1135,12 +1140,13 @@ def run_due_searches(db, now=None, today=None, browser=None, between=None,
     if not due:
         return False
 
+    due.sort(key=lambda item: not item[1].get("force"))   # 직접 부른 검색부터
     sites = search.load_sites()
     owns_browser = browser is None
     browser = browser or search.Browser()
     try:
         for chat_id, watch in due:
-            if chatting and chatting():
+            if chatting and chatting(bool(watch.get("force"))):
                 print("💬 대화 중이라 남은 검색은 다음 바퀴로 미룹니다")
                 break
             forced = bool(watch.get("force"))
@@ -1153,6 +1159,9 @@ def run_due_searches(db, now=None, today=None, browser=None, between=None,
                       f"({len(result.offers)}건) {result.note}")
             print(f"   ⏱️ {time.time() - began:.0f}초")
 
+            # 이 숙소를 검색하는 동안 '지금'을 받았으면 그 요청에도 답한다.
+            # 예전에는 표시만 지우고 결과를 안 보내서, 검색 중이던 숙소는 답이 없었다.
+            forced = forced or bool(watch.get("force"))
             watch["last_searched"] = int(now)
             watch["force"] = False
             kind, available = decide_notification(watch, results, now, forced)
@@ -1204,17 +1213,19 @@ def main():
             if process_updates(db, browser, timeout=0):
                 seen["activity"] = time.time()
 
-        def chatting():
+        def chatting(forced=False):
+            """대화 중인가. '지금'처럼 직접 부른 검색은 누가 등록하는 중일 때만 미룬다."""
             last = seen["activity"]
-            return last is not None and time.time() - last < CHAT_QUIET
+            if last is None or time.time() - last >= CHAT_QUIET:
+                return False
+            return not forced or any(chat.get("state") for chat in db["chats"].values())
 
         while True:
             handled = process_updates(db, browser, timeout=timeout)
             if handled:
                 seen["activity"] = time.time()
-            searched = (False if chatting() else
-                        run_due_searches(db, browser=browser, between=pump,
-                                         chatting=chatting))
+            searched = run_due_searches(db, browser=browser, between=pump,
+                                        chatting=chatting)
             storage.save_db(db)
             storage.persist()
 
