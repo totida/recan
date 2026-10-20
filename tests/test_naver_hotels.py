@@ -66,6 +66,28 @@ RATES_NOT_LOADED = lines(
     "판매 사이트에서 숙소명, 위치, 가격 등을 재확인하세요. / 지도보기 / 로그아웃 / 전체서비스 / "
     "공유하기 / 개인정보처리방침 / 이용약관 / 고객센터 / NAVER")
 
+# 사용자 스크린샷: 11/03~11/04 성인 1 — Hotels.com 싱글룸 88,377원 등 방이 있는데 봇은 마감이라고 알렸다.
+# 같은 주소를 봇 쪽에서 1분 안에 세 번 열었더니 짧은 화면 → 방 목록 → 짧은 화면이었다.
+RATES_SHORT_1103 = lines(
+    "Naver / 여행상품 / 여행정보 / 로그인 / 마이페이지 / 여행핫딜 / 항공 / 호텔 / 패키지 / For U / "
+    "이전으로 이동 / 변경 / 더보기 / 요약 / 지도 / 11.03. 화 - 11.04. 수, 1박 / 성인1 / "
+    "예약 가능한 객실이 없습니다. / 일정 및 인원수 조건을 변경해주세요. / 일정 변경 / 인원수 변경 / "
+    "로그인 / 전체서비스 / 공유하기 / NAVER")
+RATES_OPEN_1103 = lines(
+    "Naver / 여행상품 / 여행정보 / 로그인 / 마이페이지 / 여행핫딜 / 항공 / 호텔 / 패키지 / For U / "
+    "이전으로 이동 / 토요코인 서울강남 / 변경 / 더보기 / 서울특별시서초구서초동 / 토요코인 서울강남3급 / "
+    "11.03.-11.04. (1박) / 88,377원 / 전체 가격 비교하기 / 88,377원~ / 11.03.화-11.04.수, 1박1명 / "
+    "전체 가격 비교하기 / 공유 / 무료 조식 서비스가 제공되는 가성비 좋은 호텔 / "
+    "서울 서초구 강남대로 323  위치길찾기거리뷰 / 요약 / 가격비교 / 사진 / 관련글 / 리뷰 / 지도 / "
+    "시설정보 / 4/9 / 11.03. 화 - 11.04. 수, 1박 / 성인1 / 조건 / 객실유형 / 여행사 / 전체 / "
+    "1박 최저가 추이 / 최저가 평균 13만원 / 가격 낮은순 / 1박 세금 포함 / "
+    "판매 사이트에서 숙소명, 위치, 가격 등을 재확인하세요. / 88,377원~ / 더보기 / 네이버페이 / "
+    "96,209원~ / 더보기 / 제공 / 트립어드바이저 / 광고 / 싱글룸, 금연 / 무료예약취소조식 / "
+    "무료취소 26.11.02.(월) 14:59 전까지 / 88,377원 / 싱글룸 / 무료예약취소조식 / "
+    "무료취소 26.11.02.(월) 14:59 전까지 / 97,900원 / 네이버페이 / 최대 4,895원 적립 / "
+    "트윈룸, 금연 / 무료예약취소조식 / 무료취소 26.11.02.(월) 14:59 전까지 / 114,195원 / "
+    "이 호텔을 본 다른 사람이  / 함께 찾는 호텔이에요! / 88호텔 / 8.2 / 59,870원~ / NAVER")
+
 SITE = {"key": "naver_hotels", "name": "네이버 호텔 가격비교",
         "rates_url": "https://hotels.naver.com/accommodation/search/detail/domestic/"
                      "{place_id}/rates?rateTab=&dCheckIn={checkin}&dCheckOut={checkout}"
@@ -141,6 +163,39 @@ class AnalyzeRatesTest(unittest.TestCase):
             "https://hotels.naver.com/accommodation/search/detail/domestic/1745414542/rates"),
             "1745414542")
         self.assertEqual(search.naver_place_id("https://example.com/1"), "")
+
+
+class FlakyPageTest(unittest.TestCase):
+    """봇 쪽에서 열면 짧은 화면이 섞여 나온다."""
+
+    def test_short_page_is_not_soldout(self):
+        # 이전 코드는 이 화면을 마감으로 읽어 사용자에게 '마감' 이라고 알렸다
+        status, _ = search.analyze_naver_rates(RATES_SHORT_1103, "2026-11-03", "2026-11-04")
+        self.assertEqual(status, search.STATUS_UNKNOWN)
+
+    def test_opens_again_until_rooms_show(self):
+        class Sequence:
+            def __init__(self, pages):
+                self.pages = list(pages)
+                self.opened = 0
+
+            def page_text(self, url, wait=10, scrolls=3):
+                self.opened += 1
+                return self.pages.pop(0)
+
+        item = watch("2026-11-03", "2026-11-04", guests=1)
+        browser = Sequence([RATES_SHORT_1103, RATES_OPEN_1103, RATES_SHORT_1103])
+        result = search.naver_rates_result(browser, item, SITE, "1745414542")
+        self.assertEqual(result.status, search.STATUS_AVAILABLE)
+        self.assertEqual(result.offers[0].price, "88,377원")
+        self.assertEqual(browser.opened, 2)          # 방 목록이 나오면 더 열지 않는다
+        self.assertIn("dAdultCnt=1", result.url)
+
+        browser = Sequence([RATES_SHORT_1103] * 3)
+        result = search.naver_rates_result(browser, item, SITE, "1745414542")
+        self.assertEqual(result.status, search.STATUS_UNKNOWN)
+        self.assertEqual(browser.opened, 3)
+        self.assertIn("3번 열어 봄", result.note)
 
 
 class RatesResultTest(unittest.TestCase):

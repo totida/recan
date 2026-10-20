@@ -1012,19 +1012,29 @@ def naver_rates_url(template, place_id, watch):
                            checkout=watch["checkout"], guests=watch.get("guests", 2))
 
 
-def naver_rates_result(browser, watch, site, place_id):
+# 봇 쪽에서 열면 숙소 정보 없는 짧은 화면이 자주 나온다. 같은 주소를 1분 안에 세 번 열었더니
+# 짧은 화면 → 방 목록(88,377원) → 짧은 화면이었다(2026-10-20 실측). 판정이 안 나면 다시 연다.
+RATES_TRIES = 3
+
+
+def naver_rates_result(browser, watch, site, place_id, tries=RATES_TRIES):
     """네이버 호텔 가격비교 화면을 열어 그 날짜에 방이 있는지 본다."""
     if not place_id:
         return SiteResult(site["key"], site["name"], STATUS_NONE,
                           note="네이버에서 숙소를 찾지 못해 가격비교를 열 수 없어요")
     url = naver_rates_url(site["rates_url"], place_id, watch)
-    try:
-        page = browser.page_text(url)
-    except Exception as exc:  # noqa: BLE001
-        return SiteResult(site["key"], site["name"], STATUS_ERROR, url,
-                          note=str(exc).splitlines()[0][:120])
+    for attempt in range(1, tries + 1):
+        try:
+            page = browser.page_text(url)
+        except Exception as exc:  # noqa: BLE001
+            return SiteResult(site["key"], site["name"], STATUS_ERROR, url,
+                              note=str(exc).splitlines()[0][:120])
+        status, note = analyze_naver_rates(page, watch["checkin"], watch["checkout"])
+        if status != STATUS_UNKNOWN:
+            break
+    if status == STATUS_UNKNOWN and note:
+        note = f"{note} ({tries}번 열어 봄)"
 
-    status, note = analyze_naver_rates(page, watch["checkin"], watch["checkout"])
     section = naver_rates_section(page)
     budget = watch_budget(watch)
     if (status == STATUS_AVAILABLE and budget
