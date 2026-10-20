@@ -421,6 +421,13 @@ class UrlTest(unittest.TestCase):
 
     def test_configured_sites_build(self):
         for site in search.load_sites():
+            if site.get("rates_url"):   # 네이버 호텔 가격비교: 검색이 아니라 숙소 번호로 연다
+                url = search.naver_rates_url(site["rates_url"], "1745414542", {
+                    "checkin": "2026-05-02", "checkout": "2026-05-03", "guests": 2})
+                self.assertTrue(url.startswith("https://"), site["key"])
+                self.assertIn("1745414542", url)
+                self.assertIn("2026-05-02", url)
+                continue
             candidates = search.site_urls(site)
             self.assertTrue(candidates, site["key"])
             for template in candidates:
