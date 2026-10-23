@@ -137,8 +137,30 @@ def new_watch(query, checkin, checkout, guests=2, url=None, address="", keyword=
     }
 
 
+def new_seat_watch(url, title, count, max_row=None, starts_at=0, sale_end=0, when=""):
+    """공연 좌석 감시 항목. 숙소(watches)와 따로 chat["seats"] 에 둔다."""
+    return {
+        "id": uuid.uuid4().hex[:8],
+        "url": url,                 # 네이버 예약 좌석 선택 화면 링크(회차가 정해짐)
+        "title": title,             # 공연 이름
+        "when": when,               # 표시용 공연 시각 '2026-11-08(일) 16:00'
+        "starts_at": starts_at,     # 공연 시작(epoch 초). 지나면 감시를 끝낸다
+        "sale_end": sale_end,       # 온라인 예매 마감(epoch 초)
+        "count": count,             # 붙어 있어야 하는 자리 수
+        "max_row": max_row,         # 이 열까지만 본다. None 이면 전체
+        "created_at": int(time.time()),
+        "last_checked": 0,
+        "last_notified": 0,
+        "open_seats": [],           # 지난 확인 때 조건에 맞던 자리 이름들
+        "fails": 0,
+        "force": False,
+    }
+
+
 def get_chat(db, chat_id):
-    return db["chats"].setdefault(str(chat_id), {"state": None, "watches": []})
+    chat = db["chats"].setdefault(str(chat_id), {"state": None, "watches": []})
+    chat.setdefault("seats", [])
+    return chat
 
 
 def _iso_from_compact(value):
@@ -185,6 +207,7 @@ def migrate(raw):
         for chat in raw["chats"].values():
             chat.setdefault("state", None)
             chat.setdefault("watches", [])
+            chat.setdefault("seats", [])
             for watch in chat["watches"]:
                 watch.setdefault("address", "")
                 watch.setdefault("keyword", watch.get("query", ""))

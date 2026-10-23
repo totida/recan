@@ -17,6 +17,7 @@ import dateparse
 import keyboards
 import price
 import search
+import seats
 import storage
 import telegram_api
 
@@ -27,6 +28,14 @@ NOTIFY_INTERVAL = int(os.environ.get("NOTIFY_INTERVAL_MIN", "120")) * 60
 MAX_WATCHES = int(os.environ.get("MAX_WATCHES", "10"))
 DEFAULT_GUESTS = 2
 MAX_GUESTS = 20
+# 공연 좌석은 페이지 하나만 받아 읽어서(크롬 없이 1초 안팎) 숙소보다 자주 본다.
+# 취소표는 금방 나가므로 숙소 검색 주기(10분)로는 늦다.
+SEAT_INTERVAL = int(os.environ.get("SEAT_INTERVAL_MIN", "3")) * 60
+SEAT_MAX_COUNT = 10
+# 좌석 화면을 이만큼 연달아 못 읽으면 한 번 알린다. (3분 간격이면 15분)
+SEAT_FAIL_ALERT = 5
+SEAT_COUNT_RE = re.compile(r"(\d+)\s*(?:명|연석|석|자리|매)")
+SEAT_ROW_RE = re.compile(r"(\d+)\s*열")
 
 # 실행 방식은 두 가지다.
 #   IDLE_EXIT_SEC > 0 : 조용하면 곧바로 종료 (비공개 저장소·사용 시간 절약)
@@ -106,6 +115,9 @@ HELP_TEXT = (
     "네이버 숙소 링크를 붙여넣어도 등록돼요.\n"
     "인터파크 트리플은 이름으로 검색이 안 돼요. 트리플 숙소 링크를 보내주시면\n"
     "그 숙소에 연결해 두고 날짜·인원을 바꿔가며 함께 확인해 드려요.\n\n"
+    "🎭 네이버 예약 공연 좌석 화면 링크를 보내주시면, 붙은 빈자리(취소표)가\n"
+    "나올 때 알려드려요. 몇 명 · 몇 열까지는 버튼으로 고르면 돼요.\n"
+    "  예) (좌석 화면 링크) 4명 10열\n\n"
     "📌 명령어\n"
     "  목록 — 등록된 알림 보기\n"
     "  삭제 2 — 2번 알림 삭제 (삭제 전체 = 모두 삭제)\n"
@@ -185,10 +197,11 @@ def format_report(watch, results, header=""):
     return "\n".join(lines)
 
 
-def format_watch_list(watches):
-    if not watches:
+def format_watch_list(watches, seat_watches=()):
+    """숙소 다음에 공연 좌석을 이어서 번호를 매긴다. ('삭제 N' 도 같은 번호)"""
+    if not watches and not seat_watches:
         return "등록된 알림이 없어요. 숙소 이름을 보내서 새로 등록해 보세요!"
-    lines = ["📋 감시 중인 숙소"]
+    lines = ["📋 감시 중인 숙소"] if watches else []
     for index, watch in enumerate(watches, start=1):
         lines.append(f"{index}. {watch['query']}")
         if watch.get("address"):
@@ -198,6 +211,14 @@ def format_watch_list(watches):
             lines.append(f"   💰 {price_text(watch)}")
         if watch.get("triple"):
             lines.append("   🔗 인터파크 트리플 연결됨")
+    if seat_watches:
+        if lines:
+            lines.append("")
+        lines.append("🎭 감시 중인 공연 좌석")
+    for index, watch in enumerate(seat_watches, start=len(watches) + 1):
+        lines.append(f"{index}. {watch['title']}")
+        lines.append(f"   📅 {watch['when']}")
+        lines.append(f"   🎯 {seat_target(watch)}")
     return "\n".join(lines)
 
 
@@ -257,21 +278,38 @@ def _menu_command(text):
 def _ask_delete(chat):
     """어느 알림을 지울지 버튼으로 고르게 한다."""
     watches = chat["watches"]
-    if not watches:
+    seat_watches = chat["seats"]
+    if not watches and not seat_watches:
         return [reply("삭제할 알림이 없어요.")]
     lines = ["🗑️ 어느 알림을 지울까요?", ""]
     for index, watch in enumerate(watches, start=1):
         lines.append(f"{index}. {watch['query']} · {watch['checkin']} → {watch['checkout']}")
-    return [reply("\n".join(lines), keyboards.delete_keyboard(watches))]
+    for index, watch in enumerate(seat_watches, start=len(watches) + 1):
+        lines.append(f"{index}. 🎭 {watch['title']} · {watch['when']}")
+    # 버튼 글자는 숙소와 같은 모양(이름 · 날짜)으로 만든다.
+    labels = watches + [{"query": f"🎭 {watch['title']}", "checkin": watch["when"]}
+                        for watch in seat_watches]
+    return [reply("\n".join(lines), keyboards.delete_keyboard(labels))]
+
+
+def _remove_watch(chat, index):
+    """목록 번호(0부터)로 숙소·공연 좌석 알림을 지우고 지운 것을 한 줄로 돌려준다."""
+    watches = chat["watches"]
+    if 0 <= index < len(watches):
+        removed = watches.pop(index)
+        return f"{removed['query']} ({removed['checkin']} → {removed['checkout']})"
+    index -= len(watches)
+    if 0 <= index < len(chat["seats"]):
+        removed = chat["seats"].pop(index)
+        return f"🎭 {removed['title']} ({removed['when']})"
+    return None
 
 
 def _delete_one(chat, index, edit=False):
-    watches = chat["watches"]
-    if not 0 <= index < len(watches):
+    removed = _remove_watch(chat, index)
+    if not removed:
         return [reply("그 번호의 알림이 없어요.", edit=edit)]
-    removed = watches.pop(index)
-    return [reply(f"🗑️ 삭제했어요: {removed['query']} "
-                  f"({removed['checkin']} → {removed['checkout']})", edit=edit)]
+    return [reply(f"🗑️ 삭제했어요: {removed}", edit=edit)]
 
 
 def _extract_url(text):
@@ -616,21 +654,200 @@ def _change_price(chat, argument):
 
 
 def _handle_delete(chat, argument):
-    watches = chat["watches"]
-    if not watches:
+    total = len(chat["watches"]) + len(chat["seats"])
+    if not total:
         return "삭제할 알림이 없어요."
     if argument in ("전체", "모두", "all", ""):
         chat["watches"] = []
+        chat["seats"] = []
         chat["state"] = None
         return "🗑️ 모든 알림을 삭제했어요."
     if argument.isdigit():
-        index = int(argument)
-        if 1 <= index <= len(watches):
-            removed = watches.pop(index - 1)
-            return (f"🗑️ 삭제했어요: {removed['query']} "
-                    f"({removed['checkin']} → {removed['checkout']})")
-        return f"1 ~ {len(watches)} 사이의 번호를 알려주세요."
+        removed = _remove_watch(chat, int(argument) - 1)
+        if removed:
+            return f"🗑️ 삭제했어요: {removed}"
+        return f"1 ~ {total} 사이의 번호를 알려주세요."
     return "'삭제 2' 처럼 번호를 붙이거나 '삭제 전체'라고 보내주세요."
+
+
+# --------------------------------------------------------------------------
+# 공연 좌석 (네이버 예약 좌석 화면)
+# --------------------------------------------------------------------------
+
+def seat_target(watch):
+    """'10열 이내 · 4명 붙은 자리'"""
+    rows = f"{watch['max_row']}열 이내" if watch.get("max_row") else "전체 열"
+    count = watch.get("count", 2)
+    seats_text = f"{count}명 붙은 자리" if count > 1 else "1자리"
+    return f"{rows} · {seats_text}"
+
+
+def _seat_header(watch):
+    return f"🎭 {watch['title']}\n📅 {watch['when']}"
+
+
+def _start_seat_watch(chat, link, text):
+    """좌석 화면 링크를 받으면 공연을 읽어 보고, 빠진 조건(몇 명·몇 열)을 묻는다."""
+    chat["state"] = None
+    url, slot = link
+    try:
+        page = seats.check(url)
+    except seats.SeatPageError as exc:
+        return [reply(f"⚠️ 좌석 화면을 읽지 못했어요. ({exc})\n잠시 뒤 링크를 다시 보내주세요.")]
+    end = page.sale_end or page.starts_at
+    if end and end.timestamp() <= time.time():
+        return [reply(f"🎭 {page.title}\n이미 온라인 예매가 끝난 회차예요.")]
+
+    rest = text.replace(url, " ")
+    count = SEAT_COUNT_RE.search(rest)
+    row = SEAT_ROW_RE.search(rest)
+    state = {
+        "url": url, "slot": slot, "title": page.title or "공연",
+        "when": seats.describe_time(page.starts_at) or "날짜 모름",
+        "starts_at": int(page.starts_at.timestamp()) if page.starts_at else 0,
+        "sale_end": int(page.sale_end.timestamp()) if page.sale_end else 0,
+        "count": int(count.group(1)) if count else None,
+        "max_row": int(row.group(1)) if row else None,
+        "row_set": bool(row),
+        "touched_at": int(time.time()),
+    }
+    if state["count"] is not None and not 1 <= state["count"] <= SEAT_MAX_COUNT:
+        state["count"] = None
+    return _next_seat_question(chat, state)
+
+
+def _next_seat_question(chat, state, edit=False):
+    chat["state"] = state
+    if not state.get("count"):
+        state["step"] = "await_seat_count"
+        return [reply(f"{_seat_header(state)}\n\n"
+                      "👥 몇 명이 붙어 앉을 자리를 찾을까요?",
+                      keyboards.seat_count_keyboard(), edit=edit)]
+    if not state.get("row_set"):
+        state["step"] = "await_seat_row"
+        return [reply(f"{_seat_header(state)}\n👥 {state['count']}명\n\n"
+                      "📏 앞에서 몇 열까지 볼까요?\n그 열까지의 자리만 알려드려요.",
+                      keyboards.seat_row_keyboard(), edit=edit)]
+    return _register_seat(chat, state, edit=edit)
+
+
+def _set_seat_count(chat, state, count, edit=False):
+    if not 1 <= count <= SEAT_MAX_COUNT:
+        return [reply(f"1 ~ {SEAT_MAX_COUNT}명 사이로 알려주세요.")]
+    state["count"] = count
+    return _next_seat_question(chat, state, edit=edit)
+
+
+def _set_seat_row(chat, state, max_row, edit=False):
+    state["max_row"] = max_row or None
+    state["row_set"] = True
+    return _next_seat_question(chat, state, edit=edit)
+
+
+def _register_seat(chat, state, edit=False):
+    chat["state"] = None
+    for existing in chat["seats"]:
+        if (existing["url"].split("?")[0] == state["url"].split("?")[0]
+                and existing["count"] == state["count"]
+                and existing.get("max_row") == state["max_row"]):
+            return [reply(f"이미 등록된 알림이에요: {existing['title']} "
+                          f"({seat_target(existing)})", edit=edit)]
+    if len(chat["seats"]) >= MAX_WATCHES:
+        return [reply(f"공연 좌석 알림은 최대 {MAX_WATCHES}개까지 등록할 수 있어요. "
+                      "'목록' 후 '삭제 번호'로 정리해 주세요.", edit=edit)]
+
+    watch = storage.new_seat_watch(
+        state["url"], state["title"], state["count"], state["max_row"],
+        starts_at=state["starts_at"], sale_end=state["sale_end"], when=state["when"])
+    watch["force"] = True  # 등록 직후 지금 좌석 상황을 한 번 보낸다
+    chat["seats"].append(watch)
+    minutes = max(1, SEAT_INTERVAL // 60)
+    return [reply(
+        "✅ 등록 완료!\n"
+        f"{_seat_header(watch)}\n"
+        f"🎯 {seat_target(watch)}\n\n"
+        f"{minutes}분마다 좌석을 확인하고, 취소표로 자리가 나면 바로 알려드릴게요.\n"
+        "잠시 후 지금 좌석 상황을 보내드립니다.",
+        edit=edit,
+    )]
+
+
+def format_seat_report(watch, page, runs, header):
+    lines = [header, _seat_header(watch), f"🎯 {seat_target(watch)}", ""]
+    if runs:
+        lines.extend(f"✅ {seats.describe_run(run)}" for run in runs)
+    elif not page.on_sale:
+        lines.append("⏸️ 지금은 이 회차를 팔고 있지 않아요. 계속 지켜볼게요.")
+    else:
+        lines.append("⛔ 지금은 조건에 맞는 자리가 없어요. 나오면 바로 알려드릴게요.")
+        free = f"   빈자리 {page.free_count()}석"
+        if watch.get("max_row"):
+            free += f" · 그중 {watch['max_row']}열 이내 {page.free_count(watch['max_row'])}석"
+        lines.append(free)
+    lines.append("")
+    lines.append(watch["url"])
+    return "\n".join(lines)
+
+
+def _seat_sale_over(watch, now):
+    end = watch.get("sale_end") or watch.get("starts_at")
+    return bool(end) and now >= end
+
+
+def check_seat_watch(chat_id, watch, now):
+    """좌석 화면 한 번 읽고, 조건에 맞는 자리가 새로 났으면 알린다."""
+    forced = bool(watch.get("force"))
+    watch["force"] = False
+    watch["last_checked"] = int(now)
+    try:
+        page = seats.check(watch["url"])
+    except seats.SeatPageError as exc:
+        watch["fails"] = watch.get("fails", 0) + 1
+        print(f"🎭 좌석 확인 실패({watch['fails']}회): {watch['title']} — {exc}")
+        if forced or watch["fails"] == SEAT_FAIL_ALERT:
+            telegram_api.send_message(
+                chat_id, f"⚠️ '{watch['title']}' 좌석 화면을 읽지 못했어요. ({exc})\n"
+                         "계속 다시 확인할게요.")
+        return
+    watch["fails"] = 0
+
+    runs = seats.find_runs(page.seats, watch["count"], watch.get("max_row")) if page.on_sale else []
+    open_now = sorted(seat.name for run in runs for seat in run)
+    before = set(watch.get("open_seats") or [])
+    print(f"🎭 좌석: {watch['title']} {watch['when']} (chat {mask(chat_id)}) "
+          f"→ 조건 맞는 자리 {len(runs)}곳 · 빈자리 {page.free_count()}석")
+
+    # 처음 났거나 다른 자리가 새로 났으면 바로, 같은 자리가 계속 남아 있으면
+    # 숙소처럼 NOTIFY_INTERVAL 마다 한 번 다시 알린다.
+    fresh = any(name not in before for name in open_now)
+    overdue = open_now and now - watch.get("last_notified", 0) >= NOTIFY_INTERVAL
+    if forced or fresh or overdue:
+        header = ("🚨 조건에 맞는 자리가 났어요! 서둘러 예매해 보세요." if runs
+                  else "🔄 요청하신 좌석 확인 결과예요.")
+        if telegram_api.send_message(chat_id, format_seat_report(watch, page, runs, header)):
+            watch["last_notified"] = int(now)
+    elif before and not open_now:
+        telegram_api.send_message(
+            chat_id, f"🔕 '{watch['title']}' ({watch['when']}) 방금 알려드린 자리가 "
+                     "다시 나갔어요. 계속 지켜볼게요.")
+    watch["open_seats"] = open_now
+
+
+def run_due_seat_checks(db, now=None):
+    """확인할 때가 된 공연 좌석을 확인한다. 예매가 끝난 공연은 목록에서 뺀다."""
+    now = now or time.time()
+    for chat_id, chat in db["chats"].items():
+        remaining = []
+        for watch in chat.get("seats", []):
+            if _seat_sale_over(watch, now):
+                telegram_api.send_message(
+                    chat_id, f"🗓️ '{watch['title']}' ({watch['when']}) 온라인 예매가 끝나 "
+                             "목록에서 삭제했어요.")
+                continue
+            remaining.append(watch)
+            if watch.get("force") or now - watch.get("last_checked", 0) >= SEAT_INTERVAL:
+                check_seat_watch(chat_id, watch, now)
+        chat["seats"] = remaining
 
 
 # --------------------------------------------------------------------------
@@ -681,7 +898,7 @@ def handle_text(db, chat_id, text, today=None, lookup=None):
                       "이름만 보내시면 주소·날짜·인원은 버튼으로 고르시면 돼요.")]
 
     if head_lower in ("목록", "list", "리스트"):
-        return [reply(format_watch_list(chat["watches"]))]
+        return [reply(format_watch_list(chat["watches"], chat["seats"]))]
 
     if head_lower in ("삭제", "delete", "제거", "초기화"):
         if not argument:
@@ -702,15 +919,21 @@ def handle_text(db, chat_id, text, today=None, lookup=None):
         return [reply(_change_price(chat, argument))]
 
     if head_lower in ("지금", "지금검색", "새로고침", "now", "refresh"):
-        if not chat["watches"]:
+        if not chat["watches"] and not chat["seats"]:
             return [reply("등록된 알림이 없어요. 숙소 이름부터 보내주세요.")]
-        for watch in chat["watches"]:
+        for watch in chat["watches"] + chat["seats"]:
             watch["force"] = True
         count = len(chat["watches"])
+        if not count:
+            return [reply("🔄 지금 바로 좌석을 확인할게요. 곧 보내드려요!")]
         if count == 1:
             return [reply("🔄 지금 바로 검색할게요. 2~3분쯤 걸려요!")]
         return [reply(f"🔄 지금 바로 검색할게요. 숙소 {count}곳이라 한 곳씩 끝나는 대로 "
                       f"보내드려요. (한 곳에 2~3분, 다 오려면 {count * 3}분쯤)")]
+
+    seat_link = seats.find_link(text)
+    if seat_link:
+        return _start_seat_watch(chat, seat_link, text)
 
     state = chat.get("state") or {}
     if state and time.time() - state.get("touched_at", 0) > STATE_TTL:
@@ -805,13 +1028,27 @@ def handle_text(db, chat_id, text, today=None, lookup=None):
             return [reply("알겠습니다. 숙소 이름부터 다시 알려주세요. (예: 비토애 산청)")]
         return [reply("'예' 또는 '아니오'로 답해주세요. 처음부터 다시 하려면 '취소'.")]
 
-    # 7) 트리플 링크를 붙일 알림 고르기
+    # 7) 공연 좌석: 몇 명 · 몇 열까지 (버튼 대신 적어도 되게)
+    if step == "await_seat_count":
+        match = re.search(r"\d+", text)
+        if not match:
+            return [reply("몇 명인지 숫자로 알려주세요. (예: 4 또는 4명)")]
+        return _set_seat_count(chat, state, int(match.group()))
+    if step == "await_seat_row":
+        if _wants_any_price(command):
+            return _set_seat_row(chat, state, None)
+        match = re.search(r"\d+", text)
+        if not match:
+            return [reply("몇 열까지인지 숫자로 알려주세요. (예: 10 또는 10열, 전부면 '상관없음')")]
+        return _set_seat_row(chat, state, int(match.group()))
+
+    # 8) 트리플 링크를 붙일 알림 고르기
     if step == "await_triple_target":
         if command.isdigit():
             return _attach_triple(chat, state.get("triple", ""), int(command) - 1)
         return [reply("목록의 번호를 보내주시거나 버튼을 눌러주세요. (취소하려면 '취소')")]
 
-    # 8) 새 요청 — 링크 또는 숙소 이름
+    # 9) 새 요청 — 링크 또는 숙소 이름
     triple = search.triple_link(text)
     if triple:
         return _ask_triple_target(chat, triple)
@@ -878,6 +1115,7 @@ def handle_callback(db, chat_id, data, today=None):
             return _delete_one(chat, int(value), edit=True)
         if kind == "all":
             chat["watches"] = []
+            chat["seats"] = []
             chat["state"] = None
             return [reply("🗑️ 모든 알림을 삭제했어요.", edit=True)]
         if kind == "cancel":
@@ -887,6 +1125,17 @@ def handle_callback(db, chat_id, data, today=None):
     if not state:
         return [reply("진행 중인 등록이 없어요. 숙소 이름을 다시 보내주세요.")]
     state["touched_at"] = int(time.time())   # 버튼을 누르는 동안은 계속 등록 중이다
+
+    if action == "seat":
+        if kind == "count" and value.isdigit():
+            return _set_seat_count(chat, state, int(value), edit=True)
+        if kind == "row":
+            return _set_seat_row(chat, state, int(value) if value.isdigit() else None,
+                                 edit=True)
+        if kind == "cancel":
+            chat["state"] = None
+            return [reply("등록을 취소했어요.", edit=True)]
+        return []
 
     if action == "triple":
         if kind == "pick" and value.isdigit():
@@ -1209,9 +1458,10 @@ def main():
               f"{SEARCH_INTERVAL // 60}분)")
     try:
         def pump():
-            """검색이 도는 중에도 텔레그램 입력을 계속 받아준다."""
+            """검색이 도는 중에도 텔레그램 입력을 계속 받고, 공연 좌석도 제때 본다."""
             if process_updates(db, browser, timeout=0):
                 seen["activity"] = time.time()
+            run_due_seat_checks(db)
 
         def chatting(forced=False):
             """대화 중인가. '지금'처럼 직접 부른 검색은 누가 등록하는 중일 때만 미룬다."""
@@ -1224,6 +1474,7 @@ def main():
             handled = process_updates(db, browser, timeout=timeout)
             if handled:
                 seen["activity"] = time.time()
+            run_due_seat_checks(db)
             searched = run_due_searches(db, browser=browser, between=pump,
                                         chatting=chatting)
             storage.save_db(db)
