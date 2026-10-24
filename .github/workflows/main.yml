@@ -62,6 +62,7 @@ jobs:
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           SEARCH_INTERVAL_MIN: '10'   # 항목별 검색 주기(분)
+          SEAT_INTERVAL_MIN: '3'      # 공연 좌석 확인 주기(분). 크롬 없이 페이지 하나라 가볍다
           NOTIFY_INTERVAL_MIN: '120'  # 빈방이 계속 열려 있을 때 다시 알리는 간격(분)
           POLL_TIMEOUT_SEC: '20'      # long polling 대기(초)
           IDLE_EXIT_SEC: '0'          # 0 = 조용해도 종료하지 않음(상시 대기)

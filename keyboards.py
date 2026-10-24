@@ -144,6 +144,27 @@ def price_message(query, checkin, checkout, nights, guests):
     )
 
 
+SEAT_COUNT_CHOICES = (2, 3, 4, 5, 6)
+SEAT_ROW_CHOICES = (5, 10, 15, 20)
+
+
+def seat_count_keyboard():
+    """공연 좌석: 몇 자리가 붙어 있어야 하나."""
+    return [
+        [_button(f"{n}명", f"seat:count:{n}") for n in SEAT_COUNT_CHOICES],
+        [_button("✖️ 취소", "seat:cancel")],
+    ]
+
+
+def seat_row_keyboard():
+    """공연 좌석: 앞에서 몇 열까지 볼까."""
+    return [
+        [_button(f"{n}열까지", f"seat:row:{n}") for n in SEAT_ROW_CHOICES],
+        [_button("🎫 상관없음", "seat:row:any")],
+        [_button("✖️ 취소", "seat:cancel")],
+    ]
+
+
 def confirm_keyboard():
     return [[_button("✅ 예, 등록할게요", "confirm:yes"),
              _button("↩️ 아니오", "confirm:no")]]

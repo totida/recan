@@ -37,6 +37,13 @@ jobs:
       - run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+      # 공연 좌석 화면은 브라우저로 열면 로그인 화면으로 넘어간다. 봇처럼 크롬 없이
+      # 받아 읽은 결과(빈자리·4석 이상 붙은 자리)를 따로 찍는다.
+      - name: 좌석 화면 읽기 (봇과 같은 방식)
+        if: contains(inputs.url, '/seats/')
+        env:
+          URL: ${{ inputs.url }}
+        run: python seats.py "$URL" 4
       - name: 주소 열어보기
         run: |
           python tools/check_url.py \
