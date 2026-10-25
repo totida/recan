@@ -16,6 +16,11 @@ from test_bot import CHAT, FakeTelegram, buttons, texts  # noqa: E402
 LINK = ("https://m.booking.naver.com/booking/12/bizes/1688834/items/7826615/seats/1310178633"
         "?area=pll&lang=ko&startDateTime=2026-11-08T00%3A00%3A00%2B09%3A00&theme=place")
 
+# 2026-10-25 사용자가 텔레그램에 실제로 보낸 링크. 좌석 화면이 아니라 공연 화면에 회차(slotId)가 붙은 모양이다.
+USER_ITEM_LINK = ("https://m.booking.naver.com/booking/12/bizes/1688834/items/7826615"
+                  "?area=pll&lang=ko&slotId=1310178633"
+                  "&startDateTime=2026-11-08T00%3A00%3A00%2B09%3A00&theme=place")
+
 # 2026-10-23 사용자가 보낸 공연(누가 내 머리에 똥 쌌어 - 부산 낙동, 11-08 16:00)의
 # 실제 좌석 상태. 열마다 1번부터 X=팔림, .=빈자리. (B구역 11열만 5번부터 있다)
 REAL_ROWS = {
@@ -163,6 +168,14 @@ class SeatPageTest(unittest.TestCase):
             "https://m.booking.naver.com/booking/3/bizes/1/items/2?startDate=2026-11-08"))
         self.assertIsNone(seats.find_link("비토애 산청 5/2~5/3"))
 
+    def test_item_link_with_slot_becomes_seat_link(self):
+        self.assertEqual(seats.find_link(USER_ITEM_LINK), (LINK, "1310178633"))
+
+    def test_item_link_without_slot_is_not_seat_link(self):
+        self.assertIsNone(seats.find_link(
+            "https://m.booking.naver.com/booking/12/bizes/1688834/items/7826615"
+            "?startDateTime=2026-11-08T00%3A00%3A00%2B09%3A00"))
+
 
 class FakeSeats:
     """seats.check 를 가로채 정해둔 화면을 돌려준다."""
@@ -171,12 +184,14 @@ class FakeSeats:
         self.html = html or page_html()
         self.error = error
         self.calls = 0
+        self.urls = []
 
     def __enter__(self):
         self._check = seats.check
 
         def check(url):
             self.calls += 1
+            self.urls.append(url)
             if self.error:
                 raise seats.SeatPageError(self.error)
             return seats.parse_page(self.html)
@@ -214,6 +229,25 @@ class SeatRegistrationTest(unittest.TestCase):
         watch = db["chats"][CHAT]["seats"][0]
         self.assertEqual((watch["count"], watch["max_row"], watch["force"]), (4, 10, True))
         self.assertEqual(watch["title"], "누가 내 머리에 똥 쌌어 - 부산 낙동")
+        self.assertIsNone(db["chats"][CHAT]["state"])
+
+    def test_user_item_link_asks_count_not_calendar(self):
+        db = new_db()
+        with FakeSeats() as fake:
+            replies = bot.handle_text(db, CHAT, USER_ITEM_LINK)
+        self.assertEqual(fake.urls, [LINK])
+        self.assertIn("몇 명", texts(replies))
+        self.assertNotIn("체크인", texts(replies))
+        self.assertEqual(db["chats"][CHAT]["state"]["url"], LINK)
+
+    def test_performance_link_without_slot_asks_for_time(self):
+        db = new_db()
+        with FakeSeats() as fake:
+            replies = bot.handle_text(
+                db, CHAT, "https://m.booking.naver.com/booking/12/bizes/1688834/items/7826615")
+        self.assertEqual(fake.urls, [])
+        self.assertIn("회차", texts(replies))
+        self.assertNotIn("체크인", texts(replies))
         self.assertIsNone(db["chats"][CHAT]["state"])
 
     def test_link_only_asks_count_then_rows(self):
