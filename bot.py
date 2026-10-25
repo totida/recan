@@ -934,6 +934,10 @@ def handle_text(db, chat_id, text, today=None, lookup=None):
     seat_link = seats.find_link(text)
     if seat_link:
         return _start_seat_watch(chat, seat_link, text)
+    if seats.PERFORMANCE_RE.search(text):
+        chat["state"] = None
+        return [reply("🎭 공연 링크를 받았어요. 그런데 날짜·시간(회차)이 안 정해진 링크예요.\n"
+                      "네이버 예약에서 회차를 고르고 좌석 선택 화면에서 공유한 링크를 보내주세요.")]
 
     state = chat.get("state") or {}
     if state and time.time() - state.get("touched_at", 0) > STATE_TTL:

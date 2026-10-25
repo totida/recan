@@ -12,14 +12,19 @@ import re
 import sys
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import requests
 
 KST = timezone(timedelta(hours=9))
 WEEKDAYS = "월화수목금토일"
 
+# 좌석 화면(…/items/공연/seats/회차) 또는 회차를 고른 공연 화면(…/items/공연?slotId=회차).
+# 텔레그램 공유로는 뒤의 모양이 온다.
 LINK_RE = re.compile(
-    r"https?://(?:m\.)?booking\.naver\.com/booking/\d+/bizes/\d+/items/\d+/seats/(\d+)[^\s]*")
+    r"https?://(?:m\.)?booking\.naver\.com/booking/\d+/bizes/\d+/items/\d+[^\s]*")
+# 회차를 아직 안 고른 공연 화면. 좌석 화면으로 바꿀 수 없어 회차를 골라 달라고 한다.
+PERFORMANCE_RE = re.compile(r"https?://(?:m\.)?booking\.naver\.com/booking/12/bizes/\d+/items/\d+")
 # 'A구역 8열 1번', '1층 B구역 12열 3번', 'C열 7번'
 SEAT_NAME_RE = re.compile(r"^(.*?)\s*(\S+?)\s*열\s*(\d+)\s*번")
 # 좌석 그림(seattle) 상태: normal · selected · sold · hidden · notForSale.
@@ -61,11 +66,22 @@ class SeatPage:
 
 
 def find_link(text):
-    """메시지에서 좌석 화면 링크를 찾는다. (링크, 회차 번호) 또는 None."""
+    """메시지에서 좌석 화면 링크를 찾는다. (좌석 화면 주소, 회차 번호) 또는 None."""
     match = LINK_RE.search(text or "")
     if not match:
         return None
-    return match.group(0).rstrip(".,)>]"), match.group(1)
+    link = match.group(0).rstrip(".,)>]")
+    parts = urlsplit(link)
+    seat = re.search(r"/seats/(\d+)", parts.path)
+    if seat:
+        return link, seat.group(1)
+    query = parse_qsl(parts.query)
+    slot = next((value for key, value in query if key == "slotId" and value.isdigit()), None)
+    if not slot:
+        return None
+    rest = urlencode([(key, value) for key, value in query if key != "slotId"])
+    path = f"{parts.path.rstrip('/')}/seats/{slot}"
+    return urlunsplit((parts.scheme, parts.netloc, path, rest, "")), slot
 
 
 def apollo_state(html):
