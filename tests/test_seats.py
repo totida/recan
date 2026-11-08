@@ -1,8 +1,10 @@
 import json
 import os
 import sys
+import time
 import unittest
 from datetime import datetime
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -204,6 +206,28 @@ class FakeSeats:
 
 
 NOW = datetime(2026, 10, 23, 13, 0, tzinfo=seats.KST).timestamp()
+
+
+class ShiftedClock:
+    """bot 이 보는 시계를 NOW(사용자가 등록한 날, 예매 기간 안)부터 흐르게 한다.
+
+    실제 시계를 쓰면 이 공연의 예매 마감(2026-11-07 17:00)이 지난 뒤로 등록이 막혀 테스트가 깨진다.
+    """
+
+    def __init__(self, now):
+        self.offset = time.time() - now
+
+    def time(self):
+        return time.time() - self.offset
+
+    def __getattr__(self, name):
+        return getattr(time, name)
+
+
+def setUpModule():
+    clock = mock.patch.object(bot, "time", ShiftedClock(NOW))
+    clock.start()
+    unittest.addModuleCleanup(clock.stop)
 
 
 def new_db():
