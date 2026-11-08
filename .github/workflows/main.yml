@@ -2,12 +2,12 @@ name: 숙소 예약 알림봇
 
 on:
   workflow_dispatch:
-  schedule:
-    # 이 예약은 '봇을 다시 띄우는 방아쇠'다.
-    # 한 번 뜨면 MAX_RUN_SEC(약 5시간 30분) 동안 계속 켜져 있으면서
-    # SEARCH_INTERVAL_MIN 마다 검색하고, 버튼 입력에는 1초 안에 반응한다.
-    # GitHub 가 예약 실행을 미루더라도 실행 하나가 길어서 공백이 거의 없다.
-    - cron: '*/5 * * * *'
+  # 2026-11-08 쓰는 사람이 없어 예약 실행을 껐다. 다시 켤 때는 맨 아래 두 줄(schedule, cron)의
+  # 주석을 풀어 main 에 반영한 뒤 Run workflow 로 바로 띄운다 (docs/사용설명서.md '켜기 / 끄기').
+  # 이 예약은 '봇을 다시 띄우는 방아쇠'다. 한 번 뜨면 MAX_RUN_SEC(약 5시간 30분) 동안
+  # 켜져 있으면서 SEARCH_INTERVAL_MIN 마다 검색하고, 버튼 입력에는 1초 안에 반응한다.
+  # schedule:
+  #   - cron: '*/5 * * * *'
 
 permissions:
   contents: write
